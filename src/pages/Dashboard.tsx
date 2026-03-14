@@ -26,6 +26,45 @@ const Dashboard = () => {
   const [userName, setUserName] = useState<string>("");
   const [hasShownWelcome, setHasShownWelcome] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Mobile detection logic
+  useEffect(() => {
+    const checkDevice = () => {
+      const width = window.innerWidth;
+      const userAgent = navigator.userAgent.toLowerCase();
+      const isMobileDevice = /iphone|ipad|ipod|android|blackberry|windows phone/g.test(userAgent);
+      
+      if (width < 1024 || isMobileDevice) {
+        setIsMobile(true);
+      } else {
+        setIsMobile(false);
+      }
+    };
+
+    checkDevice();
+    window.addEventListener('resize', checkDevice);
+    return () => window.removeEventListener('resize', checkDevice);
+  }, []);
+
+  if (isMobile) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6 text-center">
+        <div className="max-w-md space-y-6 animate-in fade-in zoom-in duration-500">
+          <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><rect width="18" height="12" x="3" y="4" rx="2" ry="2"/><line x1="2" x2="22" y1="20" y2="20"/><line x1="12" x2="12" y1="20" y2="16"/></svg>
+          </div>
+          <h1 className="text-3xl font-bold text-foreground">Desktop Only Access</h1>
+          <p className="text-muted-foreground text-lg leading-relaxed">
+            This CRM is designed for professional desktop/laptop use only. Please log in from a computer to manage your data securely.
+          </p>
+          <div className="p-4 bg-primary/5 rounded-lg border border-primary/10">
+            <p className="text-sm text-primary font-medium">Mobile & Tablet access is restricted for security.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   useEffect(() => {
     const checkAuth = async () => {
