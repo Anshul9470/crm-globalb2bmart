@@ -55,40 +55,33 @@ const Auth = () => {
       }
 
       // For non-admins, enforce login approval
-      // Use maybeSingle + latest record to avoid 406 errors
-      const { data: approval } = await supabase
-        .from("login_approvals")
+      const { data: approval, error: approvalError } = await (supabase
+        .from("login_approvals" as any)
         .select("*")
         .eq("user_id", authData.user.id)
         .order("requested_at", { ascending: false })
         .limit(1)
-        .maybeSingle();
+        .maybeSingle() as any);
 
-      // If no approval record exists, create one and send email
+      if (approvalError) {
+        console.error("Error fetching approval status:", approvalError);
+      }
+
+      // If no approval record exists, create one and send notification
       if (!approval) {
-        // Get user metadata
         const userName = authData.user.user_metadata?.display_name || authData.user.email?.split("@")[0] || "User";
-
-        // Create approval request
-        const { error: insertError } = await supabase
-          .from("login_approvals")
+        
+        await (supabase
+          .from("login_approvals" as any)
           .insert({
             user_id: authData.user.id,
             user_email: authData.user.email || loginEmail,
             user_name: userName,
             status: "pending",
-          });
+          }) as any);
 
-        if (insertError) {
-          console.error("Error creating approval request:", insertError);
-        }
-
-        // Send email notification to admin
         await sendLoginApprovalEmail(authData.user.email || loginEmail, userName);
-
-        // Sign out the user until approved
         await supabase.auth.signOut();
-
         toast.info("Your login request has been sent for approval. You will receive an email once approved.");
         return;
       }
@@ -106,7 +99,7 @@ const Auth = () => {
         return;
       }
 
-      // If approved, allow login
+      // If approved, allow login. Dashboard will "consume" this approval once it loads.
       if (approval.status === "approved") {
         toast.success("Login successful!");
         navigate("/dashboard");
