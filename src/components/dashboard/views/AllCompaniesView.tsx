@@ -77,13 +77,35 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
         console.warn("Facebook data fetch failed:", fbError);
       }
 
-      const combinedData = [
+      const rawCombinedData = [
         ...(companiesData || []),
         ...(fbData || []).map((fb: any) => ({
           ...fb,
           is_facebook_data: true,
         })),
       ];
+
+      // Deduplicate by phone number, keeping facebook_data over companies
+      const deduplicatedMap = new Map();
+      rawCombinedData.forEach((item) => {
+        // Only deduplicate if phone exists
+        if (item.phone) {
+          const existing = deduplicatedMap.get(item.phone);
+          if (existing) {
+            // Keep the one that IS facebook data
+            if (!existing.is_facebook_data && item.is_facebook_data) {
+              deduplicatedMap.set(item.phone, item);
+            }
+          } else {
+            deduplicatedMap.set(item.phone, item);
+          }
+        } else {
+          // Fallback key using ID if no phone
+          deduplicatedMap.set(`id-${item.id}-${item.is_facebook_data}`, item);
+        }
+      });
+
+      const combinedData = Array.from(deduplicatedMap.values());
 
       combinedData.sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()

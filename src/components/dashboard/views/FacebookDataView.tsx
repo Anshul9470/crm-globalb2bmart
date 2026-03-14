@@ -960,22 +960,7 @@ const FacebookDataView = ({ userId, userRole }: FacebookDataViewProps) => {
 
       if (fbError) throw fbError;
 
-      // 2. Insert into companies (Sync)
-      const { error: compError } = await supabase
-        .from("companies")
-        .insert([{
-          company_name: newFacebookData.company_name,
-          owner_name: newFacebookData.owner_name,
-          phone: newFacebookData.phone,
-          email: newFacebookData.email,
-          products_services: `${newFacebookData.products} ${newFacebookData.services}`.trim(),
-          created_by_id: userId,
-          approval_status: "pending" // Add this so it goes to Company Approvals
-        }]);
-
-      if (compError) console.warn("Sync to companies failed:", compError);
-
-      toast.success("Data added to Facebook and All Companies successfully");
+      toast.success("Data added to Facebook successfully");
       setAddDialogOpen(false);
       setNewFacebookData({
         name: "", email: "", phone: "", company_name: "", owner_name: "", products: "", services: ""
@@ -1005,6 +990,12 @@ const FacebookDataView = ({ userId, userRole }: FacebookDataViewProps) => {
         else if (header.includes("product")) obj.products = values[index];
         else if (header.includes("service")) obj.services = values[index];
       });
+
+      // Fallback: If company_name is missing or empty, use owner_name as company_name
+      if (!obj.company_name && obj.owner_name) {
+        obj.company_name = obj.owner_name;
+      }
+
       return obj;
     });
   };
@@ -1042,32 +1033,9 @@ const FacebookDataView = ({ userId, userRole }: FacebookDataViewProps) => {
           const { error: fbErr } = await (supabase.from("facebook_data" as any).insert([row]) as any);
           if (!fbErr) fbSuccess++;
         }
-
-        // Sync to Companies
-        const { data: existingComp } = await supabase
-          .from("companies")
-          .select("id")
-          .eq("company_name", row.company_name)
-          .eq("phone", row.phone)
-          .is("deleted_at", null);
-
-        if (!existingComp || existingComp.length === 0) {
-          const { error: compErr } = await supabase
-            .from("companies")
-            .insert([{
-              company_name: row.company_name,
-              owner_name: row.owner_name,
-              phone: row.phone,
-              email: row.email,
-              products_services: `${row.products || ""} ${row.services || ""}`.trim(),
-              created_by_id: userId,
-              approval_status: "pending" // Go to Company Approvals
-            }]);
-          if (!compErr) compSuccess++;
-        }
       }
 
-      toast.success(`Imported ${fbSuccess} to Facebook and ${compSuccess} to All Companies.`);
+      toast.success(`Imported ${fbSuccess} to Facebook.`);
       setAddDialogOpen(false);
       setBulkData("");
       fetchFacebookData();

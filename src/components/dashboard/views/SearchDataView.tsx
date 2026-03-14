@@ -389,9 +389,36 @@ const SearchDataView = ({ userRole }: { userRole?: string }) => {
         }
       }
 
-      setSearchResults(results);
+      // Deduplicate results by phone number, preferring "facebook" type over "company"
+      const deduplicatedMap = new Map<string, SearchResult>();
+      results.forEach((result) => {
+        const phone = result.data.phone;
+        if (phone) {
+          const existing = deduplicatedMap.get(phone);
+          if (existing) {
+            // Merge employees
+            const mergedEmployees = [...(existing.employees || []), ...(result.employees || [])];
+            const uniqueEmployees = Array.from(new Map(mergedEmployees.map(e => [e.id, e])).values()) as EmployeeInfo[];
+            
+            if (existing.type !== "facebook" && result.type === "facebook") {
+              const newResult = { ...result, employees: uniqueEmployees.length > 0 ? uniqueEmployees : undefined };
+              deduplicatedMap.set(phone, newResult);
+            } else {
+              existing.employees = uniqueEmployees.length > 0 ? uniqueEmployees : undefined;
+            }
+          } else {
+            deduplicatedMap.set(phone, result);
+          }
+        } else {
+          deduplicatedMap.set(`id-${result.type}-${result.id}`, result);
+        }
+      });
 
-      if (results.length === 0) {
+      const finalResults = Array.from(deduplicatedMap.values());
+
+      setSearchResults(finalResults);
+
+      if (finalResults.length === 0) {
         // Check if we found companies/facebook data but they were filtered
         const foundCompanies = companies && companies.length > 0;
         const foundFacebook = facebookData && facebookData.length > 0;
@@ -402,7 +429,7 @@ const SearchDataView = ({ userRole }: { userRole?: string }) => {
           toast.info("No results found. Try a different search term.");
         }
       } else {
-        toast.success(`Found ${results.length} result(s)`);
+        toast.success(`Found ${finalResults.length} result(s)`);
       }
     } catch (error: any) {
       console.error("Error in search:", error);

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Loader2, Check, X, User, Users, Clock, CheckCircle2, XCircle } from "lucide-react";
+import FacebookDataCard from "./FacebookDataCard";
 
 const CompanyApprovalView = () => {
   const [newListedData, setNewListedData] = useState<any[]>([]);
@@ -69,8 +70,55 @@ const CompanyApprovalView = () => {
 
       if (shiftedError) throw shiftedError;
 
+      // Fetch Facebook data for shifted/all companies view
+      const { data: fbData, error: fbError } = await (supabase
+        .from("facebook_data" as any)
+        .select(`*`)
+        .is("deleted_at", null)
+        .is("deletion_state", null)
+        .order("created_at", { ascending: false })
+        .limit(10000) as any);
+
+      if (fbError) {
+        console.warn("Facebook data fetch failed:", fbError);
+      }
+
+      const rawCombinedShiftedData = [
+        ...(shifted || []),
+        ...(fbData || []).map((fb: any) => ({
+          ...fb,
+          is_facebook_data: true,
+        })),
+      ];
+
+      // Deduplicate by phone number, keeping facebook_data over companies
+      const deduplicatedMap = new Map();
+      rawCombinedShiftedData.forEach((item) => {
+        // Only deduplicate if phone exists
+        if (item.phone) {
+          const existing = deduplicatedMap.get(item.phone);
+          if (existing) {
+            // Keep the one that IS facebook data
+            if (!existing.is_facebook_data && item.is_facebook_data) {
+              deduplicatedMap.set(item.phone, item);
+            }
+          } else {
+            deduplicatedMap.set(item.phone, item);
+          }
+        } else {
+          // Fallback key using ID if no phone
+          deduplicatedMap.set(`id-${item.id}-${item.is_facebook_data}`, item);
+        }
+      });
+
+      const combinedShiftedData = Array.from(deduplicatedMap.values());
+
+      combinedShiftedData.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+
       // Fetch exact counts
-      const [pendingCountRes, rejectedCountRes, shiftedCountRes] = await Promise.all([
+      const [pendingCountRes, rejectedCountRes, shiftedCountRes, fbCountRes] = await Promise.all([
         supabase
           .from("companies" as any)
           .select("*", { count: "exact", head: true })
@@ -85,16 +133,20 @@ const CompanyApprovalView = () => {
           .from("companies" as any)
           .select("*", { count: "exact", head: true })
           .eq("approval_status", "approved")
+          .is("deleted_at", null) as any,
+        supabase
+          .from("facebook_data" as any)
+          .select("*", { count: "exact", head: true })
           .is("deleted_at", null) as any
       ]);
 
       setTotalNewListed(pendingCountRes.count || 0);
       setTotalRejected(rejectedCountRes.count || 0);
-      setTotalShifted(shiftedCountRes.count || 0);
+      setTotalShifted(combinedShiftedData.length);
 
       setNewListedData(pendingData || []);
       setRejectedData(rejected || []);
-      setShiftedData(shifted || []);
+      setShiftedData(combinedShiftedData);
     } catch (error: any) {
       console.error("Error fetching data:", error);
       toast.error(error.message || "Failed to fetch data");
@@ -519,7 +571,17 @@ const CompanyApprovalView = () => {
               </Card>
             ) : (
               shiftedData.map((company) => (
-                <CompanyCard key={company.id} company={company} showActions={false} />
+                company.is_facebook_data ? (
+                  <div key={`fb-${company.id}`} className="mb-4">
+                    <FacebookDataCard 
+                      data={company} 
+                      onUpdate={fetchData} 
+                      userRole="admin" 
+                    />
+                  </div>
+                ) : (
+                  <CompanyCard key={`comp-${company.id}`} company={company} showActions={false} />
+                )
               ))
             )}
           </div>
