@@ -113,8 +113,49 @@ const Dashboard = () => {
             } catch { }
           }
         }
-      } catch {
-        // Ignore profile fetch errors, use default name
+
+        // IMPORTANT: Strictly enforce per-session approval
+        if (currentRole && currentRole !== "admin") {
+          // Check if this specific browser session is already authorized
+          const isSessionApproved = sessionStorage.getItem("is_session_approved");
+          
+          if (!isSessionApproved) {
+            // New visit/session: Check the database status
+            const { data: currentApproval } = await (supabase
+              .from("login_approvals" as any)
+              .select("status")
+              .eq("user_id", currentUser.id)
+              .maybeSingle() as any);
+
+            if (currentApproval?.status !== "approved") {
+              // Not approved in DB: Kick out to Auth page
+              console.log("No active approval found for new session. Redirecting...");
+              sessionStorage.removeItem("dashboard_auth");
+              await supabase.auth.signOut();
+              navigate("/auth");
+              return;
+            }
+
+            // If approved in DB, "consume" it for this session
+            const { error: updateError } = await (supabase
+              .from("login_approvals" as any)
+              .update({ status: "pending", requested_at: new Date().toISOString() })
+              .eq("user_id", currentUser.id) as any);
+            
+            if (updateError) {
+              console.error("Critical: Could not consume approval in DB. This is usually due to RLS policies.", updateError);
+              // If we can't consume it, for safety we should still let them in but log it
+              // Or we can kick them out - for now we mark session approved to avoid refresh loops
+              sessionStorage.setItem("is_session_approved", "true");
+            } else {
+              // Mark this local session as approved so refreshes work
+              sessionStorage.setItem("is_session_approved", "true");
+              console.log("Approval consumed successfully. Session authorized.");
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error in post-auth initialization:", err);
       }
 
       // Show welcome dialog on first load (check session storage to avoid showing on refresh)
@@ -134,6 +175,7 @@ const Dashboard = () => {
       if (!session) {
         sessionStorage.removeItem("dashboard_auth");
         sessionStorage.removeItem("hasSeenWelcome");
+        sessionStorage.removeItem("is_session_approved");
         navigate("/auth");
       } else if (_event === "SIGNED_IN" || _event === "TOKEN_REFRESHED") {
         // Only update on actual sign in or token refresh, not on every state change
