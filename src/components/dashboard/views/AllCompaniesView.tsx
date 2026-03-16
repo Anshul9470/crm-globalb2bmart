@@ -81,10 +81,10 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
       if (search.trim()) {
         const query = `%${search.trim().toLowerCase()}%`;
         // For companies
-        companiesQuery = companiesQuery.or(`company_name.ilike.${query},name.ilike.${query},phone.ilike.${query},id_manual.ilike.${query}`);
+        companiesQuery = companiesQuery.or(`company_name.ilike.${query},phone.ilike.${query},owner_name.ilike.${query},email.ilike.${query}`);
         
         // For facebook_data
-        fbQuery = fbQuery.or(`company_name.ilike.${query},name.ilike.${query},phone.ilike.${query}`);
+        fbQuery = fbQuery.or(`company_name.ilike.${query},phone.ilike.${query},owner_name.ilike.${query},email.ilike.${query}`);
       } else {
         // Default view: only approved or assigned items
         companiesQuery = companiesQuery.or("approval_status.eq.approved,assigned_to_id.not.is.null");
