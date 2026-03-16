@@ -68,45 +68,72 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
   const fetchAllCompanies = async (search = "") => {
     setLoading(true);
     try {
-      let companiesQuery = supabase
-        .from("companies" as any)
-        .select("*, assigned_to:profiles!assigned_to_id(display_name)")
-        .is("deleted_at", null);
-
-      let fbQuery = supabase
-        .from("facebook_data" as any)
-        .select("*, facebook_data_shares(profiles:employee_id(display_name))")
-        .is("deleted_at", null);
+      let companiesData: any[] = [];
+      let fbData: any[] = [];
 
       if (search.trim()) {
+        // When searching, search all companies (both assigned and unassigned)
         const query = `%${search.trim().toLowerCase()}%`;
-        // For companies
-        companiesQuery = companiesQuery.or(`company_name.ilike.${query},phone.ilike.${query},owner_name.ilike.${query},email.ilike.${query},products_services.ilike.${query}`);
-        
-        // For facebook_data
-        fbQuery = fbQuery.or(`name.ilike.${query},company_name.ilike.${query},phone.ilike.${query},owner_name.ilike.${query},email.ilike.${query},products.ilike.${query},services.ilike.${query}`);
+
+        const [companiesRes, fbRes] = await Promise.all([
+          (supabase
+            .from("companies" as any)
+            .select("*, assigned_to:profiles!assigned_to_id(display_name)")
+            .is("deleted_at", null)
+            .or(`company_name.ilike.${query},phone.ilike.${query},owner_name.ilike.${query},email.ilike.${query},products_services.ilike.${query}`)
+            .limit(500) as any),
+          (supabase
+            .from("facebook_data" as any)
+            .select("*, facebook_data_shares(profiles:employee_id(display_name))")
+            .is("deleted_at", null)
+            .or(`name.ilike.${query},company_name.ilike.${query},phone.ilike.${query},owner_name.ilike.${query},email.ilike.${query},products.ilike.${query},services.ilike.${query}`)
+            .limit(500) as any),
+        ]);
+
+        if (companiesRes.error) throw companiesRes.error;
+        companiesData = companiesRes.data || [];
+        fbData = fbRes.data || [];
+
       } else {
-        // Default view: only approved or assigned items
-        companiesQuery = companiesQuery.or("approval_status.eq.approved,assigned_to_id.not.is.null");
-      }
+        // Default view: fetch ASSIGNED companies first (ALL of them, no limit)
+        // Then fetch recent unassigned/approved companies
+        const [assignedRes, unassignedRes, fbRes] = await Promise.all([
+          // ALL assigned companies — no limit so Ram's data is NEVER missed
+          (supabase
+            .from("companies" as any)
+            .select("*, assigned_to:profiles!assigned_to_id(display_name)")
+            .not("assigned_to_id", "is", null)
+            .is("deleted_at", null)
+            .order("assigned_at", { ascending: false }) as any),
 
-      const [companiesRes, fbRes] = await Promise.all([
-        (companiesQuery.order("created_at", { ascending: false }).limit(search ? 500 : 1000) as any),
-        (fbQuery.order("created_at", { ascending: false }).limit(search ? 500 : 1000) as any)
-      ]);
+          // Recent unassigned approved companies (limited)
+          (supabase
+            .from("companies" as any)
+            .select("*, assigned_to:profiles!assigned_to_id(display_name)")
+            .is("assigned_to_id", null)
+            .eq("approval_status" as any, "approved")
+            .is("deleted_at", null)
+            .order("created_at", { ascending: false })
+            .limit(800) as any),
 
-      const companiesData = companiesRes.data;
-      const companiesError = companiesRes.error;
-      const fbData = fbRes.data;
-      const fbError = fbRes.error;
+          // Facebook data
+          (supabase
+            .from("facebook_data" as any)
+            .select("*, facebook_data_shares(profiles:employee_id(display_name))")
+            .is("deleted_at", null)
+            .order("created_at", { ascending: false })
+            .limit(500) as any),
+        ]);
 
-      if (companiesError) throw companiesError;
-      if (fbError) {
-        console.warn("Facebook data fetch failed:", fbError);
+        if (assignedRes.error) throw assignedRes.error;
+
+        // Assigned companies first, then unassigned
+        companiesData = [...(assignedRes.data || []), ...(unassignedRes.data || [])];
+        fbData = fbRes.data || [];
       }
 
       const rawCombinedData = [
-        ...(companiesData || []),
+        ...companiesData,
         ...(fbData || []).map((fb: any) => ({
           ...fb,
           is_facebook_data: true,
