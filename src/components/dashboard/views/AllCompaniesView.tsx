@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import CompanyCard from "@/components/CompanyCard";
-import { Loader2, CheckSquare, Square, X, UserCheck } from "lucide-react";
+import { Loader2, CheckSquare, Square, X, UserCheck, Search } from "lucide-react";
 import { toast } from "sonner";
 import FacebookDataCard from "./FacebookDataCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 interface AllCompaniesViewProps {
   userRole?: string;
@@ -20,6 +21,7 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
   // Bulk-select state
   const [selectedItems, setSelectedItems] = useState<{ id: string | number; isFacebook: boolean }[]>([]);
   const [selectMode, setSelectMode] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Employees/TL list for assignment
   const [employees, setEmployees] = useState<any[]>([]);
@@ -60,7 +62,7 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
     try {
       const { data: companiesData, error: companiesError } = await (supabase
         .from("companies" as any)
-        .select("*")
+        .select("*, assigned_to:profiles!assigned_to_id(display_name)")
         .eq("approval_status", "approved")
         .is("deleted_at", null)
         .order("created_at", { ascending: false }) as any);
@@ -69,7 +71,7 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
 
       const { data: fbData, error: fbError } = await (supabase
         .from("facebook_data" as any)
-        .select("*")
+        .select("*, facebook_data_shares(profiles:employee_id(display_name))")
         .is("deleted_at", null)
         .order("created_at", { ascending: false }) as any);
 
@@ -252,11 +254,45 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
         )}
       </div>
 
-      {/* Select hint */}
+      {/* Bulk Select Helper & Search Bar */}
       {selectMode && (
-        <div className="mb-4 flex items-center gap-2 p-3 bg-primary/10 border border-primary/20 rounded-lg text-sm text-primary font-medium">
-          <CheckSquare className="h-4 w-4 flex-shrink-0" />
-          Click on cards to select them (max {MAX_SELECT}). Then choose an employee below to assign.
+        <div className="mb-6 space-y-4">
+          <div className="flex items-center gap-2 p-3 bg-primary/10 border border-primary/20 rounded-lg text-sm text-primary font-medium">
+            <CheckSquare className="h-4 w-4 flex-shrink-0" />
+            Click on cards to select them (max {MAX_SELECT}). Then choose an employee below to assign.
+          </div>
+          
+          <div className="relative max-w-2xl mx-auto">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+            <Input
+              placeholder="Search by company name, phone number, or ID..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-muted-foreground text-lg rounded-xl focus:ring-primary shadow-lg ring-1 ring-white/10"
+              autoFocus
+            />
+            {searchTerm && (
+              <button 
+                onClick={() => setSearchTerm("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Regular search bar when NOT in select mode (Optional but helpful) */}
+      {!selectMode && (
+        <div className="mb-6 relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search companies..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-9 bg-white/5 border-white/10 text-white"
+          />
         </div>
       )}
 
@@ -264,69 +300,101 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
         <p className="text-muted-foreground">No companies in the system yet.</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 items-stretch">
-          {companies.map((company) => {
-            const isFb = !!company.is_facebook_data;
-            const itemId = company.id;
-            const selected = isSelected(itemId, isFb);
+          {(() => {
+            const filtered = companies.filter((c) => {
+              if (!searchTerm) return true;
+              const query = searchTerm.toLowerCase();
+              return (
+                c.company_name?.toLowerCase().includes(query) ||
+                c.name?.toLowerCase().includes(query) ||
+                c.phone?.toLowerCase().includes(query) ||
+                String(c.id).includes(query) ||
+                c.id_manual?.toLowerCase().includes(query)
+              );
+            });
 
-            return (
-              <div
-                key={isFb ? `fb-${company.id}` : company.id}
-                className="relative"
-              >
-                {/* Checkbox button — z-20 so it's above the overlay */}
-                {selectMode && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); toggleSelect(itemId, isFb); }}
-                    className={`absolute top-3 left-3 z-20 rounded-md p-0.5 transition-all duration-150 shadow-md
-                      ${selected
-                        ? "bg-primary text-white scale-110"
-                        : "bg-white/90 text-gray-400 hover:text-primary hover:bg-white"
-                      }`}
-                    title={selected ? "Deselect" : "Select"}
+            if (filtered.length === 0) {
+              return (
+                <div className="col-span-full py-12 text-center bg-white/5 rounded-xl border border-white/10">
+                  <Search className="h-12 w-12 text-muted-foreground mx-auto mb-3 opacity-20" />
+                  <p className="text-xl font-semibold text-white mb-1">No matching results</p>
+                  <p className="text-muted-foreground">Try searching with a different name, phone, or ID.</p>
+                  <Button 
+                    variant="link" 
+                    onClick={() => setSearchTerm("")}
+                    className="mt-2 text-primary hover:text-primary/80"
                   >
-                    {selected ? (
-                      <CheckSquare className="h-5 w-5" />
-                    ) : (
-                      <Square className="h-5 w-5" />
-                    )}
-                  </button>
-                )}
+                    Clear Search
+                  </Button>
+                </div>
+              );
+            }
 
-                {/* Transparent overlay in select mode — sits above card (z-10) to capture clicks */}
-                {selectMode && (
-                  <div
-                    className="absolute inset-0 z-10 cursor-pointer rounded-lg"
-                    onClick={() => toggleSelect(itemId, isFb)}
-                  />
-                )}
+            return filtered.map((company) => {
+              const isFb = !!company.is_facebook_data;
+              const itemId = company.id;
+              const selected = isSelected(itemId, isFb);
 
-                {/* Card with highlight ring when selected */}
+              return (
                 <div
-                  className={`rounded-lg transition-all duration-150 h-full
-                    ${selected ? "ring-2 ring-primary ring-offset-2" : ""}
-                  `}
+                  key={isFb ? `fb-${company.id}` : company.id}
+                  className="relative"
                 >
-                  {isFb ? (
-                    <FacebookDataCard
+                  {/* Checkbox button — z-20 so it's above the overlay */}
+                  {selectMode && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleSelect(itemId, isFb); }}
+                      className={`absolute top-3 left-3 z-20 rounded-md p-0.5 transition-all duration-150 shadow-md
+                        ${selected
+                          ? "bg-primary text-white scale-110"
+                          : "bg-white/90 text-gray-400 hover:text-primary hover:bg-white"
+                        }`}
+                      title={selected ? "Deselect" : "Select"}
+                    >
+                      {selected ? (
+                        <CheckSquare className="h-5 w-5" />
+                      ) : (
+                        <Square className="h-5 w-5" />
+                      )}
+                    </button>
+                  )}
+
+                  {/* Transparent overlay in select mode — sits above card (z-10) to capture clicks */}
+                  {selectMode && (
+                    <div
+                      className="absolute inset-0 z-10 cursor-pointer rounded-lg"
+                      onClick={() => toggleSelect(itemId, isFb)}
+                    />
+                  )}
+
+                  {/* Card with highlight ring when selected */}
+                  <div
+                    className={`rounded-lg transition-all duration-150 h-full
+                      ${selected ? "ring-2 ring-primary ring-offset-2" : ""}
+                    `}
+                  >
+                    {isFb ? (
+                      <FacebookDataCard
                       data={company}
                       onUpdate={fetchAllCompanies}
                       userRole={userRole}
                       onDelete={() => { }}
+                      showAssignedTo={true}
                     />
                   ) : (
                     <CompanyCard
                       company={company}
                       onUpdate={fetchAllCompanies}
-                      showAssignedTo
+                      showAssignedTo={true}
                       canDelete={userRole === "admin"}
                       userRole={userRole}
                     />
                   )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
         </div>
       )}
 

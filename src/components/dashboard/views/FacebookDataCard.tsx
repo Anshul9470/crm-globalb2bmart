@@ -36,6 +36,7 @@ interface FacebookDataCardProps {
   isDeleted?: boolean;
   approvedForEdit?: boolean;
   customFooter?: React.ReactNode;
+  showAssignedTo?: boolean;
 }
 
 // Map database category names to display names
@@ -120,6 +121,7 @@ const FacebookDataCard = ({
   canEdit = true,
   approvedForEdit = false,
   customFooter,
+  showAssignedTo,
 }: FacebookDataCardProps) => {
   const [commentText, setCommentText] = useState("");
   const [category, setCategory] = useState("general");
@@ -413,6 +415,18 @@ const FacebookDataCard = ({
                     minute: '2-digit'
                   })}
                 </span>
+              </div>
+            )}
+            {showAssignedTo && (
+              <div className="flex items-center gap-2 text-muted-foreground pt-1 border-t min-h-[20px]">
+                <span className="font-semibold text-foreground min-w-[90px] flex-shrink-0">Assigned to:</span>
+                {(data as any).facebook_data_shares && (data as any).facebook_data_shares.length > 0 ? (
+                  <span className="text-sm truncate flex-1 min-w-0 text-emerald-600 font-bold">
+                    {(data as any).facebook_data_shares.map((s: any) => s.profiles?.display_name).filter(Boolean).join(", ")}
+                  </span>
+                ) : (
+                  <span className="text-sm text-orange-600 font-medium">Unassigned</span>
+                )}
               </div>
             )}
           </div>

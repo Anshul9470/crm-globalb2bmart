@@ -464,7 +464,6 @@ const AdminDashboard = ({ user }: AdminDashboardProps) => {
     { id: "add", label: "Add Company", icon: Plus },
     { id: "approvals", label: "Company Approvals", icon: FileCheck, count: categoryCounts.approvals },
     { id: "login-approvals", label: "Login Approvals", icon: ShieldCheck, count: categoryCounts["login-approvals"] },
-    { id: "assign", label: "Assign Data", icon: UserCog },
     { id: "facebook", label: "Facebook Data", icon: Share2, count: categoryCounts.facebook },
     { id: "search", label: "Search Data", icon: Search },
     { id: "paid-clients", label: "Paid Client Pool", icon: DollarSign, count: categoryCounts["paid-clients"] },

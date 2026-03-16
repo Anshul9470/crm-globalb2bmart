@@ -614,7 +614,7 @@ const CompanyCard = ({ company, onUpdate, canDelete, showAssignedTo, userRole, h
             <div className="flex items-center gap-2 text-muted-foreground pt-1 border-t min-h-[20px]">
               <span className="font-semibold text-foreground min-w-[90px] flex-shrink-0">Assigned to:</span>
               {company.assigned_to ? (
-                <span className="text-sm truncate flex-1 min-w-0">{company.assigned_to.display_name}</span>
+                <span className="text-sm truncate flex-1 min-w-0 text-emerald-600 font-bold">{company.assigned_to.display_name}</span>
               ) : (
                 <span className="text-sm text-orange-600 font-medium">Unassigned</span>
               )}
