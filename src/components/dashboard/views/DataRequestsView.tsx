@@ -415,7 +415,7 @@ const DataRequestsView = () => {
         .is("assigned_at", null)
         .is("deleted_at", null)
         .order("created_at", { ascending: true })
-        .limit(finalBatchSize * 3); // Fetch more to account for filtering
+        .limit(Math.max(finalBatchSize * 10, 500)); // Large pool = always enough fresh unique data
 
       if (companiesError) throw companiesError;
 
