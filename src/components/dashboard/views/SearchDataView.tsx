@@ -68,7 +68,7 @@ const SearchDataView = ({ userRole }: { userRole?: string }) => {
           )
         `)
         .is("deleted_at", null)
-        .or(`company_name.ilike.%${query}%,email.ilike.%${query}%,phone.ilike.%${query}%,owner_name.ilike.%${query}%`);
+        .or(`company_name.ilike.%${query}%,email.ilike.%${query}%,phone.ilike.%${query}%,owner_name.ilike.%${query}%,products_services.ilike.%${query}%`);
 
       companies = companiesData1;
       companiesError = error1;
@@ -256,7 +256,7 @@ const SearchDataView = ({ userRole }: { userRole?: string }) => {
           )
         `)
         .is("deletion_state", null)
-        .or(`email.ilike.%${query}%,phone.ilike.%${query}%,company_name.ilike.%${query}%,owner_name.ilike.%${query}%`) as any);
+        .or(`name.ilike.%${query}%,email.ilike.%${query}%,phone.ilike.%${query}%,company_name.ilike.%${query}%,owner_name.ilike.%${query}%,products.ilike.%${query}%,services.ilike.%${query}%`) as any);
 
       if (facebookError) {
         console.error("Error searching Facebook data:", facebookError);
