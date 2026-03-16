@@ -63,7 +63,7 @@ const CompanyApprovalView = () => {
           created_by:profiles!created_by_id(display_name, email),
           assigned_to:profiles!assigned_to_id(display_name, email)
         `)
-        .eq("approval_status", "approved")
+        .or("approval_status.eq.approved,assigned_to_id.not.is.null")
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .limit(10000) as any);

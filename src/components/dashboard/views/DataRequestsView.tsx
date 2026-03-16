@@ -488,7 +488,8 @@ const DataRequestsView = () => {
         .from("companies")
         .update({
           assigned_to_id: request.requested_by_id,
-          assigned_at: nowIso
+          assigned_at: nowIso,
+          approval_status: "approved"
         })
         .in("id", companyIds)
         .select("id, assigned_at, assigned_to_id");

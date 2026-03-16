@@ -32,6 +32,14 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
     fetchEmployees();
   }, []);
 
+  // Server-side search with debounce
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchAllCompanies(searchTerm);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
   const fetchEmployees = async () => {
     const { data: rolesData } = await supabase
       .from("user_roles")
@@ -57,24 +65,42 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
     }
   };
 
-  const fetchAllCompanies = async () => {
+  const fetchAllCompanies = async (search = "") => {
     setLoading(true);
     try {
-      const { data: companiesData, error: companiesError } = await (supabase
+      let companiesQuery = supabase
         .from("companies" as any)
         .select("*, assigned_to:profiles!assigned_to_id(display_name)")
-        .eq("approval_status", "approved")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false }) as any);
+        .is("deleted_at", null);
 
-      if (companiesError) throw companiesError;
-
-      const { data: fbData, error: fbError } = await (supabase
+      let fbQuery = supabase
         .from("facebook_data" as any)
         .select("*, facebook_data_shares(profiles:employee_id(display_name))")
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false }) as any);
+        .is("deleted_at", null);
 
+      if (search.trim()) {
+        const query = `%${search.trim().toLowerCase()}%`;
+        // For companies
+        companiesQuery = companiesQuery.or(`company_name.ilike.${query},name.ilike.${query},phone.ilike.${query},id_manual.ilike.${query}`);
+        
+        // For facebook_data
+        fbQuery = fbQuery.or(`company_name.ilike.${query},name.ilike.${query},phone.ilike.${query}`);
+      } else {
+        // Default view: only approved or assigned items
+        companiesQuery = companiesQuery.or("approval_status.eq.approved,assigned_to_id.not.is.null");
+      }
+
+      const [companiesRes, fbRes] = await Promise.all([
+        (companiesQuery.order("created_at", { ascending: false }).limit(search ? 500 : 1000) as any),
+        (fbQuery.order("created_at", { ascending: false }).limit(search ? 500 : 1000) as any)
+      ]);
+
+      const companiesData = companiesRes.data;
+      const companiesError = companiesRes.error;
+      const fbData = fbRes.data;
+      const fbError = fbRes.error;
+
+      if (companiesError) throw companiesError;
       if (fbError) {
         console.warn("Facebook data fetch failed:", fbError);
       }
@@ -301,17 +327,7 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 items-stretch">
           {(() => {
-            const filtered = companies.filter((c) => {
-              if (!searchTerm) return true;
-              const query = searchTerm.toLowerCase();
-              return (
-                c.company_name?.toLowerCase().includes(query) ||
-                c.name?.toLowerCase().includes(query) ||
-                c.phone?.toLowerCase().includes(query) ||
-                String(c.id).includes(query) ||
-                c.id_manual?.toLowerCase().includes(query)
-              );
-            });
+            const filtered = companies; // Now server-side filtered
 
             if (filtered.length === 0) {
               return (
