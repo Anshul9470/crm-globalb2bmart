@@ -135,9 +135,22 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
 
       const combinedData = Array.from(deduplicatedMap.values());
 
-      combinedData.sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
+      combinedData.sort((a, b) => {
+        // Higher priority to assigned companies
+        const aIsAssigned = a.is_facebook_data 
+          ? (a.facebook_data_shares && a.facebook_data_shares.length > 0)
+          : !!a.assigned_to_id;
+        
+        const bIsAssigned = b.is_facebook_data 
+          ? (b.facebook_data_shares && b.facebook_data_shares.length > 0)
+          : !!b.assigned_to_id;
+
+        if (aIsAssigned && !bIsAssigned) return -1;
+        if (!aIsAssigned && bIsAssigned) return 1;
+
+        // Then by created_at descending
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
 
       setCompanies(combinedData);
     } catch (error: any) {
