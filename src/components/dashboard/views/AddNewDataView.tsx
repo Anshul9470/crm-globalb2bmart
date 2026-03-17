@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Loader2, Upload, ClipboardPaste, ListPlus, Plus } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import * as XLSX from "xlsx";
 
 interface AddNewDataViewProps {
   userId: string;
@@ -432,13 +433,46 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      setBulkData(text);
-      toast.success("File loaded. Click 'Process Bulk Data' to import.");
-    };
-    reader.readAsText(file);
+    const fileExt = file.name.split('.').pop()?.toLowerCase();
+    
+    if (fileExt === 'xlsx' || fileExt === 'xls') {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const data = new Uint8Array(event.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          
+          let combinedCSV = "";
+          workbook.SheetNames.forEach((sheetName) => {
+            const worksheet = workbook.Sheets[sheetName];
+            // Convert each sheet to CSV and combine
+            const csv = XLSX.utils.sheet_to_csv(worksheet);
+            if (csv.trim()) {
+              combinedCSV += csv + "\n";
+            }
+          });
+          
+          if (combinedCSV) {
+            setBulkData(combinedCSV);
+            toast.success(`Loaded ${workbook.SheetNames.length} sheets. Click 'Process Bulk Data' to import.`);
+          } else {
+            toast.error("The Excel file seems to be empty.");
+          }
+        } catch (error) {
+          console.error("Excel read error:", error);
+          toast.error("Failed to read Excel file. Try saving as CSV.");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        setBulkData(text);
+        toast.success("File loaded. Click 'Process Bulk Data' to import.");
+      };
+      reader.readAsText(file);
+    }
   };
 
   return (
