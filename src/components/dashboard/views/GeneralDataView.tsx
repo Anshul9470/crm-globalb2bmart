@@ -276,57 +276,26 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
   const fetchGeneralData = async () => {
     setLoading(true);
 
-    // Optimized: Fetch companies with comments, limit to prevent slow queries
     const { data: userCompanies, error: companiesError } = await supabase
       .from("companies")
       .select(`
         *,
         comments (
-          id,
-          comment_text,
-          category,
-          comment_date,
-          created_at,
-          user_id,
-          user:profiles!user_id (
-            display_name,
-            email
-          )
+          id, comment_text, category, comment_date, created_at, user_id,
+          user:profiles!user_id (display_name, email)
         )
       `)
       .eq("assigned_to_id", userId)
       .is("deleted_at", null)
       .order("created_at", { ascending: true })
-      .limit(200); // Limit to prevent slow queries
+      .limit(200);
 
+    let activeCompanies: any[] = [];
     if (!companiesError && userCompanies) {
-      // Filter out companies with deletion_state
-      const activeCompanies = userCompanies.filter((company: any) => !company.deletion_state);
-
-      // Filter companies where the latest comment has "general" category
-      // Optimize: Only check latest comment instead of sorting all
-      const generalCompanies = activeCompanies.filter((company: any) => {
-        if (!company.comments || company.comments.length === 0) return false;
-        // Find latest comment without full sort
-        const latestComment = company.comments.reduce((latest: any, current: any) => {
-          if (!latest) return current;
-          return new Date(current.created_at) > new Date(latest.created_at) ? current : latest;
-        }, null);
-        return latestComment && latestComment.category === "general";
-      });
-
-      // Sort comments only for companies that passed filter (smaller set)
-      const companiesWithSortedComments = generalCompanies.map((company: any) => ({
-        ...company,
-        comments: company.comments?.sort((a: any, b: any) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        ) || []
-      }));
-
-      setCompanies(companiesWithSortedComments);
+      activeCompanies = userCompanies.filter((company: any) => !company.deletion_state);
     }
 
-    // Fetch Facebook data with general category
+    let rawFbData: any[] = [];
     if (userRole === "employee") {
       const { data: shares } = await (supabase
         .from("facebook_data_shares" as any)
@@ -335,12 +304,9 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
 
       if (shares && shares.length > 0) {
         const fbIds = shares.map((s: any) => s.facebook_data_id);
-        // Create a map of facebook_data_id to share date
         const shareDateMap: Record<number, string> = {};
         shares.forEach((share: any) => {
-          if (share.created_at) {
-            shareDateMap[share.facebook_data_id] = share.created_at;
-          }
+          if (share.created_at) shareDateMap[share.facebook_data_id] = share.created_at;
         });
 
         const { data: fbData } = await (supabase
@@ -349,96 +315,91 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
           .in("id", fbIds) as any);
 
         if (fbData) {
-          try {
-            const { data: comments } = await (supabase
-              .from("facebook_data_comments" as any)
-              .select(`
-                id,
-                facebook_data_id,
-                comment_text,
-                category,
-                comment_date,
-                created_at,
-                user_id,
-                user:profiles!user_id(display_name, email)
-              `)
-              .in("facebook_data_id", fbIds) as any);
-
-            const fbWithComments = fbData.map((fb: any) => ({
-              ...fb,
-              shared_at: shareDateMap[fb.id] || null,
-              comments: (comments || []).filter((c: any) => c.facebook_data_id === fb.id)
-                .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) // Descending: newest first
-            }));
-
-            // Exclude items with deletion_state set (they're in inactive or recycle bins)
-            const generalFbData = fbWithComments.filter((fb: any) => {
-              // CRITICAL: Exclude items with deletion_state set (inactive, recycle bins)
-              // Check for any truthy deletion_state value (inactive, team_lead_recycle, admin_recycle, etc.)
-              if (fb.deletion_state) return false;
-
-              // Also exclude items with deleted_at set
-              if (fb.deleted_at) return false;
-
-              if (!fb.comments || fb.comments.length === 0) return false;
-              const latestComment = fb.comments[0]; // Now correctly gets the newest comment
-              return latestComment && latestComment.category === "general";
-            });
-
-            setFacebookData(generalFbData);
-          } catch (err) {
-            console.warn("Could not fetch Facebook comments:", err);
-            setFacebookData([]);
-          }
-        }
-      }
-    } else if (userRole === "admin") {
-      const { data: fbData } = await (supabase
-        .from("facebook_data" as any)
-        .select("*") as any);
-
-      if (fbData) {
-        try {
           const { data: comments } = await (supabase
             .from("facebook_data_comments" as any)
             .select(`
-              id,
-              facebook_data_id,
-              comment_text,
-              category,
-              comment_date,
-              created_at,
-              user_id,
+              id, facebook_data_id, comment_text, category, comment_date, created_at, user_id,
               user:profiles!user_id(display_name, email)
-            `) as any);
+            `)
+            .in("facebook_data_id", fbIds) as any);
 
-          const fbWithComments = fbData.map((fb: any) => ({
+          rawFbData = fbData.map((fb: any) => ({
             ...fb,
+            is_facebook_data: true,
+            shared_at: shareDateMap[fb.id] || null,
             comments: (comments || []).filter((c: any) => c.facebook_data_id === fb.id)
-              .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) // Descending: newest first
-          }));
-
-          // Exclude items with deletion_state set (they're in inactive or recycle bins)
-          const generalFbData = fbWithComments.filter((fb: any) => {
-            // CRITICAL: Exclude items with deletion_state set (inactive, recycle bins)
-            // Check for any truthy deletion_state value (inactive, team_lead_recycle, admin_recycle, etc.)
-            if (fb.deletion_state) return false;
-
-            // Also exclude items with deleted_at set
-            if (fb.deleted_at) return false;
-
+              .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          })).filter((fb: any) => {
+            if (fb.deletion_state || fb.deleted_at) return false;
             if (!fb.comments || fb.comments.length === 0) return false;
-            const latestComment = fb.comments[0]; // Now correctly gets the newest comment
+            const latestComment = fb.comments[0];
             return latestComment && latestComment.category === "general";
           });
-
-          setFacebookData(generalFbData);
-        } catch (err) {
-          console.warn("Could not fetch Facebook comments:", err);
-          setFacebookData([]);
         }
       }
+    } else if (userRole === "admin") {
+      const { data: fbData } = await (supabase.from("facebook_data" as any).select("*") as any);
+      if (fbData) {
+        const { data: comments } = await (supabase
+          .from("facebook_data_comments" as any)
+          .select(`
+            id, facebook_data_id, comment_text, category, comment_date, created_at, user_id,
+            user:profiles!user_id(display_name, email)
+          `) as any);
+
+        rawFbData = fbData.map((fb: any) => ({
+          ...fb,
+          is_facebook_data: true,
+          comments: (comments || []).filter((c: any) => c.facebook_data_id === fb.id)
+            .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        })).filter((fb: any) => {
+          if (fb.deletion_state || fb.deleted_at) return false;
+          if (!fb.comments || fb.comments.length === 0) return false;
+          const latestComment = fb.comments[0];
+          return latestComment && latestComment.category === "general";
+        });
+      }
     }
+
+    // Combine and deduplicate
+    const generalCompanies = activeCompanies.filter((company: any) => {
+      if (!company.comments || company.comments.length === 0) return false;
+      const latestComment = company.comments.reduce((latest: any, current: any) => {
+        if (!latest) return current;
+        return new Date(current.created_at) > new Date(latest.created_at) ? current : latest;
+      }, null);
+      return latestComment && latestComment.category === "general";
+    });
+
+    const combinedRaw = [
+      ...generalCompanies,
+      ...rawFbData
+    ];
+
+    const deduplicatedMap = new Map();
+    combinedRaw.forEach((item) => {
+      if (item.phone) {
+        const existing = deduplicatedMap.get(item.phone);
+        if (existing) {
+          if (!existing.is_facebook_data && item.is_facebook_data) {
+            deduplicatedMap.set(item.phone, item);
+          }
+        } else {
+          deduplicatedMap.set(item.phone, item);
+        }
+      } else {
+        deduplicatedMap.set(`id-${item.id}-${item.is_facebook_data ? 'fb' : 'comp'}`, item);
+      }
+    });
+
+    const finalCombined = Array.from(deduplicatedMap.values());
+    finalCombined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    setCompanies(finalCombined.filter(i => !i.is_facebook_data).map(c => ({
+      ...c,
+      comments: c.comments?.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) || []
+    })));
+    setFacebookData(finalCombined.filter(i => i.is_facebook_data));
 
     setLoading(false);
   };

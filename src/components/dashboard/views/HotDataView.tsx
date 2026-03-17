@@ -276,76 +276,27 @@ const HotDataView = ({ userId, userRole }: HotDataViewProps) => {
   const fetchHotData = async () => {
     setLoading(true);
 
-    // Optimized: Fetch companies with comments, limit to prevent slow queries
     const { data: userCompanies, error: companiesError } = await supabase
       .from("companies")
       .select(`
         *,
         comments (
-          id,
-          comment_text,
-          category,
-          comment_date,
-          created_at,
-          user_id,
-          user:profiles!user_id (
-            display_name,
-            email
-          )
+          id, comment_text, category, comment_date, created_at, user_id,
+          user:profiles!user_id (display_name, email)
         )
       `)
       .eq("assigned_to_id", userId)
       .is("deleted_at", null)
       .order("created_at", { ascending: true })
-      .limit(200); // Limit to prevent slow queries
+      .limit(200);
 
+    let activeCompanies: any[] = [];
     if (!companiesError && userCompanies) {
-      // Filter out companies with deletion_state
-      const activeCompanies = userCompanies.filter((company: any) => {
-        if (company.deletion_state) {
-          // console.log(`[HotDataView] Excluding company ${company.id}: deletion_state=${company.deletion_state}`);
-          return false;
-        }
-        return true;
-      });
-
-      // Filter companies where the latest comment has "hot" category
-      // Optimize: Only check latest comment instead of sorting all
-      const hotCompanies = activeCompanies.filter((company: any) => {
-        if (!company.comments || company.comments.length === 0) {
-          console.log(`[HotDataView] Excluding company ${company.id}: no comments`);
-          return false;
-        }
-        // Find latest comment without full sort
-        const latestComment = company.comments.reduce((latest: any, current: any) => {
-          if (!latest) return current;
-          return new Date(current.created_at) > new Date(latest.created_at) ? current : latest;
-        }, null);
-        const matches = latestComment && latestComment.category === "hot";
-        if (matches) {
-          console.log(`[HotDataView] Including company ${company.id}: latest comment category=hot`);
-        } else {
-          console.log(`[HotDataView] Excluding company ${company.id}: latest comment category=${latestComment?.category || 'none'}`);
-        }
-        return matches;
-      });
-
-      console.log(`[HotDataView] Total companies displayed: ${hotCompanies.length} (total fetched: ${userCompanies.length}, after deletion_state filter: ${activeCompanies.length})`);
-
-      // Sort comments only for companies that passed filter (smaller set)
-      const companiesWithSortedComments = hotCompanies.map((company: any) => ({
-        ...company,
-        comments: company.comments?.sort((a: any, b: any) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        ) || []
-      }));
-
-      setCompanies(companiesWithSortedComments);
+      activeCompanies = userCompanies.filter((company: any) => !company.deletion_state);
     }
 
-    // Fetch Facebook data with hot category
+    let rawFbData: any[] = [];
     if (userRole === "employee") {
-      // For employees, get shared Facebook data
       const { data: shares } = await (supabase
         .from("facebook_data_shares" as any)
         .select("facebook_data_id, id, created_at")
@@ -353,12 +304,9 @@ const HotDataView = ({ userId, userRole }: HotDataViewProps) => {
 
       if (shares && shares.length > 0) {
         const fbIds = shares.map((s: any) => s.facebook_data_id);
-        // Create a map of facebook_data_id to share date
         const shareDateMap: Record<number, string> = {};
         shares.forEach((share: any) => {
-          if (share.created_at) {
-            shareDateMap[share.facebook_data_id] = share.created_at;
-          }
+          if (share.created_at) shareDateMap[share.facebook_data_id] = share.created_at;
         });
 
         const { data: fbData } = await (supabase
@@ -367,120 +315,91 @@ const HotDataView = ({ userId, userRole }: HotDataViewProps) => {
           .in("id", fbIds) as any);
 
         if (fbData) {
-          // Fetch comments for Facebook data
-          try {
-            const { data: comments } = await (supabase
-              .from("facebook_data_comments" as any)
-              .select(`
-                id,
-                facebook_data_id,
-                comment_text,
-                category,
-                comment_date,
-                created_at,
-                user_id,
-                user:profiles!user_id(display_name, email)
-              `)
-              .in("facebook_data_id", fbIds) as any);
-
-            // Attach comments and shared_at to Facebook data
-            const fbWithComments = fbData.map((fb: any) => ({
-              ...fb,
-              shared_at: shareDateMap[fb.id] || null,
-              comments: (comments || []).filter((c: any) => c.facebook_data_id === fb.id)
-                .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) // Descending: newest first
-            }));
-
-            // Filter Facebook data with hot category
-            // Exclude items with deletion_state set (they're in inactive or recycle bins)
-            const hotFbData = fbWithComments.filter((fb: any) => {
-              // CRITICAL: Exclude items with deletion_state set (inactive, recycle bins)
-              // Check for any truthy deletion_state value (inactive, team_lead_recycle, admin_recycle, etc.)
-              if (fb.deletion_state) {
-                console.log(`[HotDataView] Excluding FB ${fb.id}: deletion_state=${fb.deletion_state}`);
-                return false;
-              }
-
-              // Also exclude items with deleted_at set
-              if (fb.deleted_at) {
-                console.log(`[HotDataView] Excluding FB ${fb.id}: deleted_at set`);
-                return false;
-              }
-
-              if (!fb.comments || fb.comments.length === 0) {
-                console.log(`[HotDataView] Excluding FB ${fb.id}: no comments`);
-                return false;
-              }
-
-              const latestComment = fb.comments[0]; // Now correctly gets the newest comment
-              const matches = latestComment && latestComment.category === "hot";
-
-              if (matches) {
-                console.log(`[HotDataView] Including FB ${fb.id}: category=hot`);
-              } else {
-                console.log(`[HotDataView] Excluding FB ${fb.id}: latest comment category=${latestComment?.category || 'none'}`);
-              }
-
-              return matches;
-            });
-
-            console.log(`[HotDataView] Total Facebook items displayed: ${hotFbData.length}`);
-
-            setFacebookData(hotFbData);
-          } catch (err) {
-            console.warn("Could not fetch Facebook comments:", err);
-            setFacebookData([]);
-          }
-        }
-      }
-    } else if (userRole === "admin") {
-      // For admins, get all Facebook data
-      const { data: fbData } = await (supabase
-        .from("facebook_data" as any)
-        .select("*") as any);
-
-      if (fbData) {
-        try {
           const { data: comments } = await (supabase
             .from("facebook_data_comments" as any)
             .select(`
-              id,
-              facebook_data_id,
-              comment_text,
-              category,
-              comment_date,
-              created_at,
-              user_id,
+              id, facebook_data_id, comment_text, category, comment_date, created_at, user_id,
               user:profiles!user_id(display_name, email)
-            `) as any);
+            `)
+            .in("facebook_data_id", fbIds) as any);
 
-          const fbWithComments = fbData.map((fb: any) => ({
+          rawFbData = fbData.map((fb: any) => ({
             ...fb,
+            is_facebook_data: true,
+            shared_at: shareDateMap[fb.id] || null,
             comments: (comments || []).filter((c: any) => c.facebook_data_id === fb.id)
-              .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) // Descending: newest first
-          }));
-
-          // Exclude items with deletion_state set (they're in inactive or recycle bins)
-          const hotFbData = fbWithComments.filter((fb: any) => {
-            // CRITICAL: Exclude items with deletion_state set (inactive, recycle bins)
-            // Check for any truthy deletion_state value (inactive, team_lead_recycle, admin_recycle, etc.)
-            if (fb.deletion_state) return false;
-
-            // Also exclude items with deleted_at set
-            if (fb.deleted_at) return false;
-
+              .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          })).filter((fb: any) => {
+            if (fb.deletion_state || fb.deleted_at) return false;
             if (!fb.comments || fb.comments.length === 0) return false;
-            const latestComment = fb.comments[0]; // Now correctly gets the newest comment
+            const latestComment = fb.comments[0];
             return latestComment && latestComment.category === "hot";
           });
-
-          setFacebookData(hotFbData);
-        } catch (err) {
-          console.warn("Could not fetch Facebook comments:", err);
-          setFacebookData([]);
         }
       }
+    } else if (userRole === "admin") {
+      const { data: fbData } = await (supabase.from("facebook_data" as any).select("*") as any);
+      if (fbData) {
+        const { data: comments } = await (supabase
+          .from("facebook_data_comments" as any)
+          .select(`
+            id, facebook_data_id, comment_text, category, comment_date, created_at, user_id,
+            user:profiles!user_id(display_name, email)
+          `) as any);
+
+        rawFbData = fbData.map((fb: any) => ({
+          ...fb,
+          is_facebook_data: true,
+          comments: (comments || []).filter((c: any) => c.facebook_data_id === fb.id)
+            .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        })).filter((fb: any) => {
+          if (fb.deletion_state || fb.deleted_at) return false;
+          if (!fb.comments || fb.comments.length === 0) return false;
+          const latestComment = fb.comments[0];
+          return latestComment && latestComment.category === "hot";
+        });
+      }
     }
+
+    // Combine and deduplicate
+    const companiesHotOnly = activeCompanies.filter((company: any) => {
+      if (!company.comments || company.comments.length === 0) return false;
+      const latestComment = company.comments.reduce((latest: any, current: any) => {
+        if (!latest) return current;
+        return new Date(current.created_at) > new Date(latest.created_at) ? current : latest;
+      }, null);
+      return latestComment && latestComment.category === "hot";
+    });
+
+    const combinedRaw = [
+      ...companiesHotOnly,
+      ...rawFbData
+    ];
+
+    const deduplicatedMap = new Map();
+    combinedRaw.forEach((item) => {
+      if (item.phone) {
+        const existing = deduplicatedMap.get(item.phone);
+        if (existing) {
+          if (!existing.is_facebook_data && item.is_facebook_data) {
+            deduplicatedMap.set(item.phone, item);
+          }
+        } else {
+          deduplicatedMap.set(item.phone, item);
+        }
+      } else {
+        deduplicatedMap.set(`id-${item.id}-${item.is_facebook_data ? 'fb' : 'comp'}`, item);
+      }
+    });
+
+    const finalCombined = Array.from(deduplicatedMap.values());
+    finalCombined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    setCompanies(finalCombined.filter(i => !i.is_facebook_data).map(c => ({
+      ...c,
+      comments: c.comments?.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) || []
+    })));
+    setFacebookData(finalCombined.filter(i => i.is_facebook_data));
 
     setLoading(false);
   };

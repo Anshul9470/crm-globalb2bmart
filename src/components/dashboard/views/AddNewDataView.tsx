@@ -196,17 +196,34 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
 
     const headers = rows[0].map(h => h.toLowerCase());
 
-    const data = rows.slice(1).map(row => {
+    const data = rows.slice(1).map((row, rowIndex) => {
       const obj: any = {};
       headers.forEach((header: string, index: number) => {
-        if (row[index] === undefined || row[index] === null) return;
+        const val = row[index];
+        if (val === undefined || val === null || val === "") return;
 
-        if (header.includes("company") || header.includes("business")) obj.company_name = row[index];
-        else if (header.includes("owner") || header.includes("name")) obj.owner_name = row[index];
-        else if (header.includes("phone") || header.includes("mobile")) obj.phone = row[index];
-        else if (header.includes("email")) obj.email = row[index];
-        else if (header.includes("address")) obj.address = row[index];
-        else if (header.includes("product") || header.includes("service")) obj.products_services = row[index];
+        const h = header.trim().toLowerCase();
+        
+        // Smarter Company Name detection - only set if not already set
+        if (!obj.company_name && (h.includes("company") || h.includes("business") || h.includes("organization") || h === "name")) {
+          obj.company_name = val;
+        } 
+        // Smarter Owner Name detection
+        else if (!obj.owner_name && (h.includes("owner") || h.includes("person") || h.includes("client name") || h.includes("geeta"))) {
+          obj.owner_name = val;
+        }
+        // Smarter Phone detection
+        else if (!obj.phone && (h.includes("phone") || h.includes("mobile") || h.includes("contact") || h.includes("tel") || h === "ph" || h === "no" || h.includes("gluser") || h === "id")) {
+          // Extra check: if it's a name like "Geeta", skip it for phone
+          if (isNaN(Number(val.toString().substring(0, 1)))) {
+             // If first char is not a number, maybe try next header
+             return;
+          }
+          obj.phone = val;
+        }
+        else if (!obj.email && h.includes("email")) obj.email = val;
+        else if (!obj.address && (h.includes("address") || h.includes("location") || h.includes("city"))) obj.address = val;
+        else if (!obj.products_services && (h.includes("product") || h.includes("service") || h.includes("comment"))) obj.products_services = val;
       });
       return obj;
     });
@@ -234,11 +251,12 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
         .map(row => ({
           ...row,
           // Generate a composite key to help with duplicate detection
-          _identifier: row.phone.trim(),
+          _identifier: row.phone.toString().trim(),
         }));
 
       if (validRows.length === 0) {
-        toast.error("No valid data found (Company Name and Phone are required)");
+        console.log("Parsed Data Sample:", parsedData.slice(0, 2));
+        toast.error("No valid data found. Make sure 'Company' and 'Phone/ID' columns are present.");
         setImporting(false);
         return;
       }
@@ -259,26 +277,22 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
       const uniqueUploads = Array.from(uniqueUploadsMap.values());
 
       // 2. Fetch all existing company names and phones from the database to check for duplicates
-      // We do this in chunks to avoid URL too long errors on the API request
       const existingIdentifiers = new Set();
       const chunkSize = 200;
 
       for (let i = 0; i < uniqueUploads.length; i += chunkSize) {
         const chunk = uniqueUploads.slice(i, i + chunkSize);
-
-        // Use an IN query for phone numbers, which is much safer and faster than complex OR logic
-        const phoneList = chunk.map(row => row.phone);
+        const phoneList = chunk.map(row => row.phone.toString());
 
         const { data: existingDB } = await supabase
           .from("companies")
-          .select("company_name, phone")
+          .select("phone")
           .in("phone", phoneList)
           .is("deleted_at", null);
 
         if (existingDB) {
           existingDB.forEach((dbRow: any) => {
-            const id = dbRow.phone.trim();
-            existingIdentifiers.add(id);
+            existingIdentifiers.add(dbRow.phone.toString().trim());
           });
         }
       }
@@ -306,43 +320,43 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
 
       // 4. Batch insert into the database
       let successCount = 0;
-      const insertBatchSize = 500; // Insert 500 at a time
+      let lastErrorMessage = "";
+      const insertBatchSize = 500;
 
       for (let i = 0; i < rowsToInsert.length; i += insertBatchSize) {
         const batch = rowsToInsert.slice(i, i + insertBatchSize);
 
-        // Prepare data matching the DB schema
         const insertData = batch.map(row => {
-          // Remove our temporary _identifier field
           const { _identifier, ...dbRow } = row;
           return {
-            ...dbRow,
+            company_name: dbRow.company_name || "Unknown Company",
+            owner_name: dbRow.owner_name || "N/A",
+            phone: dbRow.phone || "0000000000",
+            email: dbRow.email || "",
+            address: dbRow.address || "",
+            products_services: dbRow.products_services || "",
             created_by_id: userId,
             assigned_to_id: null,
-            approval_status: "pending", // ALL roles require approval before showing in All Companies
+            approval_status: "pending",
           };
         });
 
         const { error } = await supabase.from("companies").insert(insertData);
 
         if (error) {
-          console.warn(`Batch insert error: ${error.message}. Falling back to single-row insert...`);
-          // Fallback to inserting one by one to prevent 1 duplicate from crashing the 500 batch
+          console.warn(`Batch insert error: ${error.message}.`);
+          lastErrorMessage = error.message;
+          
           let singleSuccess = 0;
-          let singleErrors = 0;
           for (const insertRow of insertData) {
             const { error: singleError } = await supabase.from("companies").insert([insertRow]);
             if (!singleError) {
               singleSuccess++;
             } else {
-              singleErrors++;
-              console.error("Single row insert error:", singleError.message, insertRow);
+              lastErrorMessage = singleError.message;
             }
           }
           successCount += singleSuccess;
-          if (singleErrors > 0) {
-            toast.warning(`Skipped ${singleErrors} rows due to database errors (e.g., hidden duplicates)`);
-          }
         } else {
           successCount += batch.length;
         }
@@ -352,7 +366,7 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
         toast.success(`Successfully imported ${successCount} companies. ${totalDuplicates} matching duplicates skipped.`);
         setBulkData("");
       } else {
-        toast.error(`Failed to import. Zero records inserted. Note: Ensure CSV has proper headers like Company, Phone`);
+        toast.error(`Import Failed: ${lastErrorMessage || "Check if data format is correct"}`);
       }
     } catch (error: any) {
       console.error("Bulk import failed:", error);

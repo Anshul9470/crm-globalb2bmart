@@ -289,10 +289,11 @@ const TodayDataView = ({ userId, userRole }: TodayDataViewProps) => {
       .order("created_at", { ascending: true })
       .limit(200); // Limit to prevent slow queries
 
+    let activeCompanies: any[] = [];
     if (!companiesError && userCompanies) {
       // Filter out companies with deletion_state (inactive, recycle bins)
       // Also exclude companies that have been moved to inactive (latest comment is 'block')
-      const activeCompanies = userCompanies.filter((company: any) => {
+      activeCompanies = userCompanies.filter((company: any) => {
         // Exclude companies with deletion_state set (inactive or recycle bins)
         if (company.deletion_state) return false;
 
@@ -309,28 +310,9 @@ const TodayDataView = ({ userId, userRole }: TodayDataViewProps) => {
 
         return true;
       });
-
-      // Filter companies that have comments from today
-      const todayCompanies = activeCompanies.filter((company: any) => {
-        if (!company.comments || company.comments.length === 0) return false;
-        return company.comments.some((comment: any) =>
-          comment.created_at.startsWith(today) &&
-          // For employees, only include their own comments
-          (userRole !== "employee" || comment.user_id === userId)
-        );
-      });
-
-      // Sort comments by created_at descending for each company
-      const companiesWithSortedComments = todayCompanies.map(company => ({
-        ...company,
-        comments: company.comments?.sort((a: any, b: any) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        ) || []
-      }));
-
-      setCompanies(companiesWithSortedComments);
     }
 
+    let rawFbData: any[] = [];
     // Fetch Facebook data with comments from today
     if (userRole === "employee") {
       const { data: shares } = await (supabase
@@ -358,27 +340,18 @@ const TodayDataView = ({ userId, userRole }: TodayDataViewProps) => {
             const { data: comments } = await (supabase
               .from("facebook_data_comments" as any)
               .select(`
-                id,
-                facebook_data_id,
-                comment_text,
-                category,
-                comment_date,
-                created_at,
-                user_id,
+                id, facebook_data_id, comment_text, category, comment_date, created_at, user_id,
                 user:profiles!user_id(display_name, email)
               `)
               .in("facebook_data_id", fbIds) as any);
 
-            const fbWithComments = fbData.map((fb: any) => ({
+            rawFbData = fbData.map((fb: any) => ({
               ...fb,
+              is_facebook_data: true,
               shared_at: shareDateMap[fb.id] || null,
               comments: (comments || []).filter((c: any) => c.facebook_data_id === fb.id)
                 .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-            }));
-
-            // Exclude items with deletion_state set (they're in inactive or recycle bins)
-            // Also exclude items where latest comment is 'block' category (moved to inactive)
-            const todayFbData = fbWithComments.filter((fb: any) => {
+            })).filter((fb: any) => {
               // Exclude items with deletion_state set (inactive or recycle bins)
               if (fb.deletion_state) return false;
 
@@ -396,11 +369,9 @@ const TodayDataView = ({ userId, userRole }: TodayDataViewProps) => {
                 (userRole !== "employee" || comment.user_id === userId)
               );
             });
-
-            setFacebookData(todayFbData);
           } catch (err) {
             console.warn("Could not fetch Facebook comments:", err);
-            setFacebookData([]);
+            rawFbData = [];
           }
         }
       }
@@ -414,25 +385,16 @@ const TodayDataView = ({ userId, userRole }: TodayDataViewProps) => {
           const { data: comments } = await (supabase
             .from("facebook_data_comments" as any)
             .select(`
-              id,
-              facebook_data_id,
-              comment_text,
-              category,
-              comment_date,
-              created_at,
-              user_id,
+              id, facebook_data_id, comment_text, category, comment_date, created_at, user_id,
               user:profiles!user_id(display_name, email)
             `) as any);
 
-          const fbWithComments = fbData.map((fb: any) => ({
+          rawFbData = fbData.map((fb: any) => ({
             ...fb,
+            is_facebook_data: true,
             comments: (comments || []).filter((c: any) => c.facebook_data_id === fb.id)
               .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-          }));
-
-          // Exclude items with deletion_state set (they're in inactive or recycle bins)
-          // Also exclude items where latest comment is 'block' category (moved to inactive)
-          const todayFbData = fbWithComments.filter((fb: any) => {
+          })).filter((fb: any) => {
             // Exclude items with deletion_state set (inactive or recycle bins)
             if (fb.deletion_state) return false;
 
@@ -446,14 +408,54 @@ const TodayDataView = ({ userId, userRole }: TodayDataViewProps) => {
 
             return fb.comments.some((comment: any) => comment.created_at.startsWith(today));
           });
-
-          setFacebookData(todayFbData);
         } catch (err) {
           console.warn("Could not fetch Facebook comments:", err);
-          setFacebookData([]);
+          rawFbData = [];
         }
       }
     }
+
+    // Combine and deduplicate
+    const todayCompaniesOnly = activeCompanies.filter((company: any) => {
+      if (!company.comments || company.comments.length === 0) return false;
+      return company.comments.some((comment: any) =>
+        comment.created_at.startsWith(today) &&
+        // For employees, only include their own comments
+        (userRole !== "employee" || comment.user_id === userId)
+      );
+    });
+
+    const combinedRaw = [
+      ...todayCompaniesOnly,
+      ...rawFbData
+    ];
+
+    const deduplicatedMap = new Map();
+    combinedRaw.forEach((item) => {
+      if (item.phone) {
+        const existing = deduplicatedMap.get(item.phone);
+        if (existing) {
+          // Prioritize Facebook data if a company with the same phone exists
+          if (!existing.is_facebook_data && item.is_facebook_data) {
+            deduplicatedMap.set(item.phone, item);
+          }
+        } else {
+          deduplicatedMap.set(item.phone, item);
+        }
+      } else {
+        // If no phone, use a unique identifier to ensure it's included
+        deduplicatedMap.set(`id-${item.id}-${item.is_facebook_data ? 'fb' : 'comp'}`, item);
+      }
+    });
+
+    const finalCombined = Array.from(deduplicatedMap.values());
+    finalCombined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    setCompanies(finalCombined.filter(i => !i.is_facebook_data).map(c => ({
+      ...c,
+      comments: c.comments?.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) || []
+    })));
+    setFacebookData(finalCombined.filter(i => i.is_facebook_data));
 
     setLoading(false);
   };
