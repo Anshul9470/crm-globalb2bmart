@@ -204,26 +204,37 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
 
         const h = header.trim().toLowerCase();
         
-        // Smarter Company Name detection - only set if not already set
+        // Smarter Company Name detection
         if (!obj.company_name && (h.includes("company") || h.includes("business") || h.includes("organization") || h === "name")) {
           obj.company_name = val;
         } 
-        // Smarter Owner Name detection
-        else if (!obj.owner_name && (h.includes("owner") || h.includes("person") || h.includes("client name") || h.includes("geeta"))) {
+        // Smarter Owner Name detection - Ignore obvious employee names or empty staff cols
+        else if (!obj.owner_name && (h.includes("owner") || (h.includes("person") && !h.includes("contact")))) {
           obj.owner_name = val;
         }
-        // Smarter Phone detection
-        else if (!obj.phone && (h.includes("phone") || h.includes("mobile") || h.includes("contact") || h.includes("tel") || h === "ph" || h === "no" || h.includes("gluser") || h === "id")) {
+        // Smarter Phone/ID detection - Handle Gluser Id
+        else if (!obj.phone && (h.includes("gluser") || h === "id" || h.includes("phone") || h.includes("mobile") || h.includes("contact") || h.includes("tel") || h === "ph" || h === "no")) {
           // Extra check: if it's a name like "Geeta", skip it for phone
-          if (isNaN(Number(val.toString().substring(0, 1)))) {
-             // If first char is not a number, maybe try next header
-             return;
-          }
+          if (isNaN(Number(val.toString().substring(0, 1)))) return;
           obj.phone = val;
         }
-        else if (!obj.email && h.includes("email")) obj.email = val;
-        else if (!obj.address && (h.includes("address") || h.includes("location") || h.includes("city"))) obj.address = val;
-        else if (!obj.products_services && (h.includes("product") || h.includes("service") || h.includes("comment"))) obj.products_services = val;
+        // Capture specific columns for city/address
+        else if (!obj.address && (h.includes("address") || h.includes("city") || h.includes("location"))) {
+          obj.address = val;
+        }
+        else if (!obj.email && h.includes("email")) {
+          obj.email = val;
+        }
+        // Capture comments and status separately to create real comments later
+        else if (h.includes("last comment") || h.includes("remark") || h.includes("previous")) {
+          obj._last_comment = val;
+        }
+        else if (h.includes("status") || (index === row.length - 1 && !obj._status)) {
+          obj._status = val;
+        }
+        else if (!obj.products_services && (h.includes("product") || h.includes("service"))) {
+          obj.products_services = val;
+        }
       });
       return obj;
     });
@@ -327,11 +338,11 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
         const batch = rowsToInsert.slice(i, i + insertBatchSize);
 
         const insertData = batch.map(row => {
-          const { _identifier, ...dbRow } = row;
+          const { _identifier, _last_comment, _status, ...dbRow } = row;
           return {
             company_name: dbRow.company_name || "Unknown Company",
             owner_name: dbRow.owner_name || "N/A",
-            phone: dbRow.phone || "0000000000",
+            phone: dbRow.phone?.toString() || "0000000000",
             email: dbRow.email || "",
             address: dbRow.address || "",
             products_services: dbRow.products_services || "",
@@ -341,24 +352,65 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
           };
         });
 
-        const { error } = await supabase.from("companies").insert(insertData);
+        // Use select() to get back IDs for comment insertion
+        const { data: insertedRows, error } = await supabase
+          .from("companies")
+          .insert(insertData)
+          .select("id, phone");
 
         if (error) {
           console.warn(`Batch insert error: ${error.message}.`);
           lastErrorMessage = error.message;
           
-          let singleSuccess = 0;
+          // Fallback logic for single rows if batch fails
           for (const insertRow of insertData) {
-            const { error: singleError } = await supabase.from("companies").insert([insertRow]);
-            if (!singleError) {
-              singleSuccess++;
+            const { data: singleRow, error: singleError } = await supabase
+              .from("companies")
+              .insert([insertRow])
+              .select("id, phone");
+
+            if (!singleError && singleRow?.[0]) {
+              successCount++;
+              // Find matching original row for comment
+              const originalRow = batch.find(r => r.phone?.toString() === insertRow.phone);
+              if (originalRow && (originalRow._last_comment || originalRow._status)) {
+                const commentText = `${originalRow._last_comment || ""}${originalRow._status ? ` [Status: ${originalRow._status}]` : ""}`.trim();
+                if (commentText) {
+                  await supabase.from("comments").insert([{
+                    company_id: singleRow[0].id,
+                    user_id: userId,
+                    comment_text: commentText,
+                    category: "general"
+                  }]);
+                }
+              }
             } else {
-              lastErrorMessage = singleError.message;
+              lastErrorMessage = singleError?.message || "Unknown error";
             }
           }
-          successCount += singleSuccess;
-        } else {
-          successCount += batch.length;
+        } else if (insertedRows) {
+          successCount += insertedRows.length;
+          
+          // Batch insert comments for successfully added companies
+          const commentEntries: any[] = [];
+          insertedRows.forEach(inserted => {
+            const originalRow = batch.find(r => r.phone?.toString() === inserted.phone);
+            if (originalRow && (originalRow._last_comment || originalRow._status)) {
+              const commentText = `${originalRow._last_comment || ""}${originalRow._status ? ` [Status: ${originalRow._status}]` : ""}`.trim();
+              if (commentText) {
+                commentEntries.push({
+                  company_id: inserted.id,
+                  user_id: userId,
+                  comment_text: commentText,
+                  category: "general"
+                });
+              }
+            }
+          });
+
+          if (commentEntries.length > 0) {
+            await supabase.from("comments").insert(commentEntries);
+          }
         }
       }
 
