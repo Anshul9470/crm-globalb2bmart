@@ -138,9 +138,12 @@ const EmployeeDashboard = ({ user }: EmployeeDashboardProps) => {
         // This matches AssignedDataView line 360-371 - employees see only uncategorized companies
         // Note: When team lead views employee dashboard, userRole is "employee", so this filter applies
         companyCount = companiesWithSortedComments.filter((company: any) => {
-          // Keep only companies with no comments (uncategorized)
-          const hasComments = company.comments && company.comments.length > 0;
-          return !hasComments;
+          // Logic: Company is considered "uncategorized" and stays in Assigned Data 
+          // until a NEW comment is added AFTER the assignment time.
+          const assignedAt = company.assigned_at ? new Date(company.assigned_at).getTime() : 0;
+          const isWorkedOn = company.comments && company.comments.length > 0 && 
+            new Date(company.comments[0].created_at).getTime() > assignedAt + 1000;
+          return !isWorkedOn;
         }).length;
 
         console.log("📊 Assigned Data Count Calculation (Companies):", {
@@ -159,43 +162,68 @@ const EmployeeDashboard = ({ user }: EmployeeDashboardProps) => {
         });
       }
 
-      // Assigned count only includes companies (Facebook data is not shown in Assigned Data section)
-      counts.assigned = companyCount;
+      let facebookAssignedCount = 0;
+      let sharedFbIds: number[] = [];
+      let shareDateMap: Record<number, string> = {};
 
-      console.log("📊 Assigned Data Total Count:", {
-        companyCount,
-        total: counts.assigned
-      });
-
-      // Fetch Facebook data count (shared to employee, without comments)
-      const { data: shares } = await (supabase
+      // Fetch Facebook data count (shared to employee, not yet worked on)
+      const { data: sharesData } = await (supabase
         .from("facebook_data_shares" as any)
-        .select("facebook_data_id")
+        .select("facebook_data_id, created_at")
         .eq("employee_id", user.id) as any);
+      
+      const shares = sharesData || [];
 
       if (shares && shares.length > 0) {
-        const fbIds = shares.map((s: any) => s.facebook_data_id);
+        sharedFbIds = (shares as any).map((s: any) => s.facebook_data_id);
+        shares.forEach((s: any) => { if (s.created_at) shareDateMap[s.facebook_data_id] = s.created_at; });
+
         const { data: fbData } = await (supabase
           .from("facebook_data" as any)
           .select("id")
-          .in("id", fbIds) as any);
+          .in("id", sharedFbIds) as any);
 
         if (fbData) {
           const { data: comments } = await (supabase
             .from("facebook_data_comments" as any)
-            .select("facebook_data_id")
-            .in("facebook_data_id", fbIds) as any);
+            .select("facebook_data_id, created_at")
+            .in("facebook_data_id", sharedFbIds) as any);
 
-          // Get set of Facebook data IDs that have comments
-          const fbIdsWithComments = new Set((comments || []).map((c: any) => c.facebook_data_id));
+          const fbCommentsMap = new Map();
+          (comments || []).forEach((c: any) => {
+            if (!fbCommentsMap.has(c.facebook_data_id)) fbCommentsMap.set(c.facebook_data_id, []);
+            fbCommentsMap.get(c.facebook_data_id).push(c);
+          });
 
-          // Count only items without comments (matching FacebookDataView logic)
-          const fbWithoutComments = fbData.filter((fb: any) => !fbIdsWithComments.has(fb.id));
-          counts.facebook = fbWithoutComments.length;
+          facebookAssignedCount = fbData.filter((fb: any) => {
+            const itemComments = fbCommentsMap.get(fb.id) || [];
+            if (itemComments.length === 0) return true;
+            
+            // Sort to find latest
+            const sortedComments = [...itemComments].sort((a: any, b: any) => 
+              new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            );
+            
+            const sharedAt = shareDateMap[fb.id] ? new Date(shareDateMap[fb.id]).getTime() : 0;
+            const latestCommentAt = new Date(sortedComments[0].created_at).getTime();
+            
+            // Keep in Assigned (Inbox) if not worked on
+            const isWorkedOn = latestCommentAt > sharedAt + 1000;
+            return !isWorkedOn;
+          }).length;
         }
-      } else {
-        counts.facebook = 0;
       }
+
+      // Total Assigned = Companies + Facebook data in "Inbox" state
+      counts.assigned = companyCount + facebookAssignedCount;
+      // Use the same count for the facebook sidebar item
+      counts.facebook = facebookAssignedCount;
+
+      console.log("📊 Assigned Data Total Count:", {
+        companyCount,
+        facebookAssignedCount,
+        total: counts.assigned
+      });
 
       // Fetch today data count (companies/facebook data with comments from today)
       // Exclude inactive data (deletion_state='inactive' or latest comment is 'block')
@@ -302,6 +330,7 @@ const EmployeeDashboard = ({ user }: EmployeeDashboardProps) => {
           .select(`
             id,
             deletion_state,
+            assigned_at,
             comments (id, category, created_at)
           `)
           .eq("assigned_to_id", user.id)
@@ -319,32 +348,18 @@ const EmployeeDashboard = ({ user }: EmployeeDashboardProps) => {
           const excludedCompanyIds: string[] = [];
 
           const categoryCompaniesCount = activeCompanies.filter((company: any) => {
-            if (!company.comments || company.comments.length === 0) {
-              if (category === 'hot') {
-                excludedCompanyIds.push(company.id);
-                // console.log(`[Prime Pool Count] Excluding company ${company.id}: no comments`);
-              }
-              return false;
-            }
+            // Logic: Company belongs to aPool ONLY if it has been worked on (new comment since assignment)
+            if (!company.comments || company.comments.length === 0) return false;
 
-            // Find latest comment using reduce (matches HotDataView logic exactly)
             const latestComment = company.comments.reduce((latest: any, current: any) => {
               if (!latest) return current;
               return new Date(current.created_at) > new Date(latest.created_at) ? current : latest;
             }, null);
 
-            const matches = latestComment && latestComment.category === category;
+            const assignedAt = company.assigned_at ? new Date(company.assigned_at).getTime() : 0;
+            const isWorkedOn = latestComment && new Date(latestComment.created_at).getTime() > assignedAt + 1000;
 
-            if (category === 'hot') {
-              if (matches) {
-                includedCompanyIds.push(company.id);
-                // console.log(`[Prime Pool Count] Including company ${company.id}: latest comment category=${latestComment.category}, created_at=${latestComment.created_at}`);
-              } else {
-                excludedCompanyIds.push(company.id);
-                // console.log(`[Prime Pool Count] Excluding company ${company.id}: latest comment category=${latestComment?.category || 'none'}, created_at=${latestComment?.created_at || 'none'}`);
-              }
-            }
-
+            const matches = isWorkedOn && latestComment.category === category;
             return matches;
           }).length;
 
@@ -423,40 +438,18 @@ const EmployeeDashboard = ({ user }: EmployeeDashboardProps) => {
                 // Must match category
                 if (comment.category !== category) return false;
 
-                // Check deletion status - CRITICAL: exclude if deletion_state or deleted_at is set
-                const fbDeletion = fbDeletionMap.get(comment.facebook_data_id);
+                // CRITICAL: Item only goes to category pools if it has been worked on (new comment since sharing)
+                const fbId = comment.facebook_data_id;
+                const sharedAt = shareDateMap[fbId] ? new Date(shareDateMap[fbId]).getTime() : 0;
+                const latestCommentAt = new Date(comment.created_at).getTime();
+                const isWorkedOn = latestCommentAt > sharedAt + 1000;
 
-                // If Facebook data record not found in query, exclude it
-                if (!fbDeletion || !fbDeletion.exists) {
-                  if (category === 'hot') {
-                    excludedFbIds.push(comment.facebook_data_id);
-                    console.log(`[Prime Pool] Excluding FB ${comment.facebook_data_id}: record not found`);
-                  }
-                  return false;
-                }
+                if (!isWorkedOn) return false;
 
-                // Exclude if deletion_state is set (inactive, recycle bins) - matches HotDataView logic
-                if (fbDeletion.deletion_state) {
-                  if (category === 'hot') {
-                    excludedFbIds.push(comment.facebook_data_id);
-                    console.log(`[Prime Pool] Excluding FB ${comment.facebook_data_id}: deletion_state=${fbDeletion.deletion_state}`);
-                  }
-                  return false;
-                }
-
-                // Exclude if deleted_at is set - matches HotDataView logic
-                if (fbDeletion.deleted_at) {
-                  if (category === 'hot') {
-                    excludedFbIds.push(comment.facebook_data_id);
-                    console.log(`[Prime Pool] Excluding FB ${comment.facebook_data_id}: deleted_at set`);
-                  }
-                  return false;
-                }
-
-                if (category === 'hot') {
-                  includedFbIds.push(comment.facebook_data_id);
-                  console.log(`[Prime Pool] Including FB ${comment.facebook_data_id}: category=hot, deletion_state=${fbDeletion.deletion_state || 'null'}, deleted_at=${fbDeletion.deleted_at || 'null'}`);
-                }
+                // Check deletion status
+                const fbDeletion = fbDeletionMap.get(fbId);
+                if (!fbDeletion || !fbDeletion.exists) return false;
+                if (fbDeletion.deletion_state || fbDeletion.deleted_at) return false;
 
                 return true;
               }
@@ -493,6 +486,7 @@ const EmployeeDashboard = ({ user }: EmployeeDashboardProps) => {
         .select(`
           id,
           deletion_state,
+          assigned_at,
           comments (id, category, created_at, user_id)
         `)
         .eq("assigned_to_id", user.id)
@@ -511,13 +505,17 @@ const EmployeeDashboard = ({ user }: EmployeeDashboardProps) => {
           // If other deletion_state values exist, exclude
           if (deletionState) return false;
 
-          // Otherwise, check latest comment for block
+          // Otherwise, check latest comment for block and if it's been worked on
           if (!company.comments || company.comments.length === 0) return false;
           const sortedComments = [...company.comments].sort(
             (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
           );
           const latestComment = sortedComments[0];
-          return latestComment && latestComment.category === "block";
+          
+          const assignedAt = company.assigned_at ? new Date(company.assigned_at).getTime() : 0;
+          const isWorkedOn = latestComment && new Date(latestComment.created_at).getTime() > assignedAt + 1000;
+          
+          return isWorkedOn && latestComment.category === "block";
         }).length;
       }
 
@@ -573,7 +571,12 @@ const EmployeeDashboard = ({ user }: EmployeeDashboardProps) => {
               (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
             );
             const latestComment = sortedComments[0];
-            return latestComment && latestComment.category === "block";
+            
+            const sharedAt = shareDateMap[fb.id] ? new Date(shareDateMap[fb.id]).getTime() : 0;
+            const latestCommentAt = new Date(latestComment.created_at).getTime();
+            const isWorkedOn = latestCommentAt > sharedAt + 1000;
+            
+            return isWorkedOn && latestComment.category === "block";
           }).length;
         }
       }
@@ -703,7 +706,7 @@ const EmployeeDashboard = ({ user }: EmployeeDashboardProps) => {
     >
       {currentView === "assigned" && <AssignedDataView userId={user.id} userRole="employee" />}
       {currentView === "facebook" && <FacebookDataView userId={user.id} userRole="employee" />}
-      {currentView === "search" && <SearchDataView />}
+      {currentView === "search" && <SearchDataView userRole="employee" />}
       {currentView === "today" && <TodayDataView userId={user.id} userRole="employee" />}
       {currentView === "followup" && <FollowUpDataView userId={user.id} userRole="employee" />}
       {currentView === "hot" && <HotDataView userId={user.id} userRole="employee" />}

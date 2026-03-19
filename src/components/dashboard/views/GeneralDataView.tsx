@@ -48,6 +48,7 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
   const [facebookData, setFacebookData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [approvedEditRequests, setApprovedEditRequests] = useState<Set<number>>(new Set());
+  const [approvedCompanyEditRequests, setApprovedCompanyEditRequests] = useState<Set<string>>(new Set());
   const [shareIdMap, setShareIdMap] = useState<Record<number, string>>({});
 
   // Edit request states for employees
@@ -68,6 +69,7 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
     fetchGeneralData();
     if (userRole !== "admin") {
       fetchApprovedEditRequests();
+      fetchApprovedCompanyEditRequests();
       fetchShareIdMap();
     }
 
@@ -82,6 +84,26 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
       window.removeEventListener("facebookDataUpdated", handleFacebookDataUpdate);
     };
   }, [userId, userRole]);
+
+  const fetchApprovedCompanyEditRequests = async () => {
+    try {
+      const { data, error } = await (supabase
+        .from("company_edit_requests" as any)
+        .select("company_id")
+        .eq("requested_by_id", userId)
+        .eq("status", "approved") as any);
+
+      if (error) {
+        console.error("Error fetching approved company edit requests:", error);
+        return;
+      }
+
+      const approvedIds = new Set<string>((data || []).map((r: any) => String(r.company_id)));
+      setApprovedCompanyEditRequests(approvedIds);
+    } catch (error) {
+      console.error("Error in fetchApprovedCompanyEditRequests:", error);
+    }
+  };
 
   const fetchApprovedEditRequests = async () => {
     try {
@@ -122,6 +144,21 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
     }
   };
 
+  const handleAdminEdit = async (data: any) => {
+    // For admins, we just open the dialog with current data
+    setRequestingEditData(data);
+    setEditRequestMessage("");
+    setEditRequestFormData({
+      company_name: data.company_name || "",
+      owner_name: data.owner_name || "",
+      phone: data.phone || "",
+      email: data.email || "",
+      products: data.products || data.products_services || "",
+      services: data.services || ""
+    });
+    setEditRequestDialogOpen(true);
+  };
+
   const handleRequestEditClick = (data: any) => {
     setRequestingEditData(data);
     setEditRequestMessage("");
@@ -130,7 +167,7 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
       owner_name: data.owner_name || "",
       phone: data.phone || "",
       email: data.email || "",
-      products: data.products || "",
+      products: data.products || data.products_services || "",
       services: data.services || ""
     });
     setEditRequestDialogOpen(true);
@@ -150,34 +187,91 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
 
     setSubmittingRequest(true);
     try {
-      const shareId = shareIdMap[requestingEditData.id];
-      if (!shareId) {
-        toast.error("Share ID not found. Please refresh the page and try again.");
-        setSubmittingRequest(false);
-        return;
-      }
-
-      const { error } = await (supabase
-        .from("facebook_data_edit_requests" as any)
-        .insert([{
-          facebook_data_id: requestingEditData.id,
-          facebook_data_share_id: shareId,
-          requested_by_id: userId,
-          request_message: editRequestMessage.trim() || "Edit request with submitted data",
-          status: "pending",
+      if (userRole === "admin") {
+        // Direct update for admins
+        const updateData: any = {
           company_name: editRequestFormData.company_name.trim(),
           owner_name: editRequestFormData.owner_name.trim(),
           phone: editRequestFormData.phone.trim(),
           email: editRequestFormData.email.trim(),
-          products: editRequestFormData.products.trim(),
-          services: editRequestFormData.services.trim() || null,
-        }]) as any);
+        };
 
-      if (error) {
-        console.error("Error submitting edit request:", error);
-        toast.error(error.message || "Failed to submit edit request");
-        setSubmittingRequest(false);
+        if (requestingEditData.is_facebook_data) {
+          updateData.products = editRequestFormData.products.trim();
+          updateData.services = editRequestFormData.services.trim() || null;
+          
+          const { error } = await (supabase
+            .from("facebook_data" as any)
+            .update(updateData)
+            .eq("id", requestingEditData.id) as any);
+          
+          if (error) throw error;
+        } else {
+          updateData.products_services = editRequestFormData.products.trim();
+          
+          const { error } = await supabase
+            .from("companies")
+            .update(updateData)
+            .eq("id", requestingEditData.id);
+          
+          if (error) throw error;
+        }
+
+        toast.success("Data updated successfully");
+        setEditRequestDialogOpen(false);
+        fetchGeneralData();
         return;
+      }
+
+      // Logic for employees (requesting edit)
+      if (requestingEditData.is_facebook_data) {
+        const shareId = shareIdMap[requestingEditData.id];
+        if (!shareId) {
+          toast.error("Share ID not found. Please refresh the page and try again.");
+          setSubmittingRequest(false);
+          return;
+        }
+
+        const { error } = await (supabase
+          .from("facebook_data_edit_requests" as any)
+          .insert([{
+            facebook_data_id: requestingEditData.id,
+            facebook_data_share_id: shareId,
+            requested_by_id: userId,
+            request_message: editRequestMessage.trim() || "Edit request with submitted data",
+            status: "pending",
+            company_name: editRequestFormData.company_name.trim(),
+            owner_name: editRequestFormData.owner_name.trim(),
+            phone: editRequestFormData.phone.trim(),
+            email: editRequestFormData.email.trim(),
+            products: editRequestFormData.products.trim(),
+            services: editRequestFormData.services.trim() || null,
+          }]) as any);
+
+        if (error) throw error;
+      } else {
+        // Company edit request
+        const { error } = await (supabase
+          .from("company_edit_requests" as any)
+          .insert([{
+            company_id: requestingEditData.id,
+            requested_by_id: userId,
+            request_message: editRequestMessage.trim() || "Edit request with submitted data",
+            status: "pending",
+            company_name: editRequestFormData.company_name.trim(),
+            owner_name: editRequestFormData.owner_name.trim(),
+            phone: editRequestFormData.phone.trim(),
+            email: editRequestFormData.email.trim(),
+            products_services: editRequestFormData.products.trim(),
+          }]) as any);
+
+        if (error) {
+          if (error.code === "PGRST204" || error.message?.includes("not found")) {
+            toast.error("The company edit requests table is missing. Contact admin.");
+            return;
+          }
+          throw error;
+        }
       }
 
       toast.success("Edit request sent successfully. Waiting for admin approval.");
@@ -193,9 +287,10 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
         services: ""
       });
       fetchApprovedEditRequests();
+      fetchApprovedCompanyEditRequests();
     } catch (error: any) {
-      console.error("Error submitting edit request:", error);
-      toast.error(error.message || "Failed to submit edit request");
+      console.error("Error processing request:", error);
+      toast.error(error.message || "Failed to process request");
     } finally {
       setSubmittingRequest(false);
     }
@@ -352,28 +447,33 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
           is_facebook_data: true,
           comments: (comments || []).filter((c: any) => c.facebook_data_id === fb.id)
             .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-        })).filter((fb: any) => {
-          if (fb.deletion_state || fb.deleted_at) return false;
-          if (!fb.comments || fb.comments.length === 0) return false;
-          const latestComment = fb.comments[0];
-          return latestComment && latestComment.category === "general";
-        });
+        }));
       }
     }
 
-    // Combine and deduplicate
     const generalCompanies = activeCompanies.filter((company: any) => {
       if (!company.comments || company.comments.length === 0) return false;
+      
       const latestComment = company.comments.reduce((latest: any, current: any) => {
         if (!latest) return current;
         return new Date(current.created_at) > new Date(latest.created_at) ? current : latest;
       }, null);
-      return latestComment && latestComment.category === "general";
+
+      const assignedAt = company.assigned_at ? new Date(company.assigned_at).getTime() : 0;
+      const isWorkedOn = latestComment && new Date(latestComment.created_at).getTime() > assignedAt + 1000;
+
+      return isWorkedOn && latestComment.category === "general";
     });
 
     const combinedRaw = [
       ...generalCompanies,
-      ...rawFbData
+      ...rawFbData.filter((fb: any) => {
+        if (!fb.comments || fb.comments.length === 0) return false;
+        const sharedAt = fb.shared_at ? new Date(fb.shared_at).getTime() : 0;
+        const latestCommentAt = new Date(fb.comments[0].created_at).getTime();
+        const isWorkedOn = latestCommentAt > sharedAt + 1000;
+        return isWorkedOn;
+      })
     ];
 
     const deduplicatedMap = new Map();
@@ -461,6 +561,9 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
               onUpdate={fetchGeneralData}
               canDelete={true}
               userRole={userRole}
+              onEdit={userRole === "admin" ? () => handleAdminEdit(company) : (approvedCompanyEditRequests.has(String(company.id)) ? () => handleAdminEdit(company) : undefined)}
+              onRequestEdit={userRole !== "admin" && !approvedCompanyEditRequests.has(String(company.id)) ? () => handleRequestEditClick(company) : undefined}
+              approvedForEdit={approvedCompanyEditRequests.has(String(company.id))}
             />
           ))}
           {facebookData.map((fb: any) => (
@@ -470,6 +573,7 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
               onUpdate={fetchGeneralData}
               userRole={userRole}
               onDelete={() => handleDelete(fb)}
+              onEdit={userRole === "admin" ? () => handleAdminEdit(fb) : (approvedEditRequests.has(fb.id) ? () => handleAdminEdit(fb) : undefined)}
               onRequestEdit={userRole !== "admin" && !approvedEditRequests.has(fb.id) ? () => handleRequestEditClick(fb) : undefined}
               approvedForEdit={approvedEditRequests.has(fb.id)}
             />
@@ -481,9 +585,11 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
       <Dialog open={editRequestDialogOpen} onOpenChange={setEditRequestDialogOpen}>
         <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-white">Submit Facebook Data</DialogTitle>
+            <DialogTitle className="text-white">
+              {userRole === "admin" ? "Edit Data" : (approvedEditRequests.has(requestingEditData?.id) || approvedCompanyEditRequests.has(String(requestingEditData?.id)) ? "Edit Data" : "Request Edit")}
+            </DialogTitle>
             <DialogDescription className="text-white/80">
-              Please fill in all required fields. Services is optional.
+              {userRole === "admin" ? "Directly update the information." : "Please fill in all required fields. Admin approval is required."}
             </DialogDescription>
           </DialogHeader>
           {requestingEditData && (
@@ -556,32 +662,35 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
                   className="text-white placeholder:text-white/50"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-request-services" className="text-white">
-                  Services <span className="text-muted-foreground">(Optional)</span>
-                </Label>
-                <Textarea
-                  id="edit-request-services"
-                  placeholder="Enter services (optional)"
-                  value={editRequestFormData.services}
-                  onChange={(e) => setEditRequestFormData({ ...editRequestFormData, services: e.target.value })}
-                  rows={3}
-                  className="text-white placeholder:text-white/50"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-request-message" className="text-white">
-                  Additional Notes (Optional)
-                </Label>
-                <Textarea
-                  id="edit-request-message"
-                  placeholder="Any additional information..."
-                  value={editRequestMessage}
-                  onChange={(e) => setEditRequestMessage(e.target.value)}
-                  rows={3}
-                  className="text-white placeholder:text-white/50"
-                />
-              </div>
+              {!requestingEditData?.is_facebook_data ? null : (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-request-services" className="text-white">
+                    Services <span className="text-muted-foreground">(Optional)</span>
+                  </Label>
+                  <Input
+                    id="edit-request-services"
+                    placeholder="Enter services (optional)"
+                    value={editRequestFormData.services}
+                    onChange={(e) => setEditRequestFormData({ ...editRequestFormData, services: e.target.value })}
+                    className="text-white placeholder:text-white/50"
+                  />
+                </div>
+              )}
+              {userRole !== "admin" && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-request-message" className="text-white">
+                    Additional Notes (Optional)
+                  </Label>
+                  <Textarea
+                    id="edit-request-message"
+                    placeholder="Any additional information..."
+                    value={editRequestMessage}
+                    onChange={(e) => setEditRequestMessage(e.target.value)}
+                    rows={3}
+                    className="text-white placeholder:text-white/50"
+                  />
+                </div>
+              )}
             </div>
           )}
           <DialogFooter>
@@ -617,10 +726,10 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
               {submittingRequest ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin text-white" />
-                  <span className="text-white">Submitting...</span>
+                  <span className="text-white">Processing...</span>
                 </>
               ) : (
-                <span className="text-white">Submit Request</span>
+                <span className="text-white">{userRole === "admin" ? "Update Data" : "Submit Request"}</span>
               )}
             </Button>
           </DialogFooter>

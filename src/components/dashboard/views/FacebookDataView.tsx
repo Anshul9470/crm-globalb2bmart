@@ -87,13 +87,7 @@ const FacebookDataView = ({ userId, userRole }: FacebookDataViewProps) => {
   const [shareIdMap, setShareIdMap] = useState<Record<number, string>>({});
   const [shareDateMap, setShareDateMap] = useState<Record<number, string>>({});
 
-  // Edit states for admin
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [editingData, setEditingData] = useState<FacebookData | null>(null);
-  const [editFormData, setEditFormData] = useState({ name: "", email: "", phone: "" });
-  const [saving, setSaving] = useState(false);
-
-  // Edit request states for employees
+  // Edit request states
   const [editRequestDialogOpen, setEditRequestDialogOpen] = useState(false);
   const [requestingEditData, setRequestingEditData] = useState<FacebookData | null>(null);
   const [editRequestMessage, setEditRequestMessage] = useState("");
@@ -123,9 +117,7 @@ const FacebookDataView = ({ userId, userRole }: FacebookDataViewProps) => {
 
   useEffect(() => {
     fetchFacebookData();
-    if (userRole !== "admin") {
-      fetchApprovedEditRequests();
-    }
+    fetchApprovedEditRequests();
   }, [userId, userRole]);
 
   const fetchApprovedEditRequests = async () => {
@@ -549,12 +541,20 @@ const FacebookDataView = ({ userId, userRole }: FacebookDataViewProps) => {
             }));
           }
 
-          // For employees, once a Facebook data item has any comment (and thus a category),
-          // it should move to the corresponding category view and be hidden from the main
-          // Facebook Data section on the employee dashboard.
+          // For employees, hide entries if they have been "worked on" (new comment after sharing)
           let finalData = typedData;
           if (userRole !== "admin") {
-            finalData = typedData.filter((item) => !item.comments || item.comments.length === 0);
+            finalData = typedData.filter((item) => {
+              if (!item.comments || item.comments.length === 0) return true;
+              
+              const sharedAt = shareDateMap[item.id] ? new Date(shareDateMap[item.id]).getTime() : 0;
+              const latestCommentAt = new Date(item.comments[0].created_at).getTime();
+              
+              // It's "worked on" if the latest comment is newer than the sharing
+              const isWorkedOn = latestCommentAt > sharedAt + 1000;
+              
+              return !isWorkedOn;
+            });
           }
 
           console.log("📝 Mapped data:", typedData);
@@ -706,60 +706,7 @@ const FacebookDataView = ({ userId, userRole }: FacebookDataViewProps) => {
     }
   };
 
-  // Admin edit functionality
-  const handleEditClick = (data: FacebookData) => {
-    setEditingData(data);
-    setEditFormData({
-      name: data.name || "",
-      email: data.email || "",
-      phone: data.phone || "",
-    });
-    setEditDialogOpen(true);
-  };
-
-  const handleSaveEdit = async () => {
-    if (!editingData) return;
-
-    // Validation: Check required fields
-    if (!editFormData.name.trim()) {
-      toast.error("Name is required");
-      return;
-    }
-    if (!editFormData.email?.trim()) {
-      toast.error("Email is required");
-      return;
-    }
-
-    // Email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(editFormData.email)) {
-      toast.error("Please enter a valid email address");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const { error } = await (supabase
-        .from("facebook_data" as any)
-        .update({
-          name: editFormData.name.trim(),
-          email: editFormData.email.trim(),
-          phone: editFormData.phone.trim() || null,
-        })
-        .eq("id", editingData.id) as any);
-
-      if (error) throw error;
-
-      toast.success("Facebook data updated successfully");
-      setEditDialogOpen(false);
-      setEditingData(null);
-      fetchFacebookData();
-    } catch (error: any) {
-      toast.error(error.message || "Failed to update Facebook data");
-    } finally {
-      setSaving(false);
-    }
-  };
+  // No direct edit handlers as everyone uses requests now
 
   // Employee edit request functionality
   const handleRequestEditClick = (data: FacebookData) => {
@@ -1383,10 +1330,9 @@ CREATE POLICY "Allow authenticated users to view facebook data"
                 data={data}
                 onUpdate={fetchFacebookData}
                 userRole={userRole}
-                // Admin can edit directly; employees only request edits (no second form after approval)
-                onEdit={userRole === "admin" ? () => handleEditClick(data) : undefined}
+                // Even admins now use the Request Edit workflow for a bigger form and tracking
                 onDelete={() => handleDelete(data)}
-                onRequestEdit={userRole !== "admin" && !approvedEditRequests.has(data.id) ? () => handleRequestEditClick(data) : undefined}
+                onRequestEdit={!approvedEditRequests.has(data.id) ? () => handleRequestEditClick(data) : undefined}
                 approvedForEdit={approvedEditRequests.has(data.id)}
               />
             ))}
@@ -1469,14 +1415,20 @@ CREATE POLICY "Allow authenticated users to view facebook data"
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleEditClick(data)}
-                                className="text-primary hover:text-primary"
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
+                              {approvedEditRequests.has(data.id) ? (
+                                <Badge variant="outline" className="h-8 w-8 rounded-full p-0 flex items-center justify-center bg-green-100 border-green-200">
+                                  <CheckSquare className="h-4 w-4 text-green-600" />
+                                </Badge>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleRequestEditClick(data)}
+                                  className="text-primary hover:text-primary"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              )}
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -1498,81 +1450,7 @@ CREATE POLICY "Allow authenticated users to view facebook data"
         </div>
       ) : null}
 
-      {/* Admin Edit Dialog */}
-      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle className="text-white">Edit Facebook Data</DialogTitle>
-            <DialogDescription className="text-white/80">
-              Update the Facebook data information. All fields are required.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-name" className="text-white">
-                Name <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="edit-name"
-                placeholder="Enter name"
-                value={editFormData.name}
-                onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
-                required
-                className="text-white placeholder:text-white/50"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-email" className="text-white">
-                Email <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="edit-email"
-                type="email"
-                placeholder="Enter email"
-                value={editFormData.email}
-                onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
-                required
-                className="text-white placeholder:text-white/50"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-phone" className="text-white">
-                Phone
-              </Label>
-              <Input
-                id="edit-phone"
-                type="tel"
-                placeholder="Enter phone number"
-                value={editFormData.phone}
-                onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
-                className="text-white placeholder:text-white/50"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setEditDialogOpen(false);
-                setEditingData(null);
-              }}
-              disabled={saving}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleSaveEdit} disabled={saving}>
-              {saving ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                "Save Changes"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* No direct edit dialog needed as admins also use requests now */}
 
       {/* Employee Edit Request Dialog */}
       <Dialog open={editRequestDialogOpen} onOpenChange={setEditRequestDialogOpen}>

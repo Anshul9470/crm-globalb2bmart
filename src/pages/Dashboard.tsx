@@ -69,10 +69,10 @@ const Dashboard = () => {
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser()
-      const cachedAuth = sessionStorage.getItem("dashboard_auth");
+      const cachedAuth = localStorage.getItem("dashboard_auth");
 
       if (!currentUser) {
-        sessionStorage.removeItem("dashboard_auth");
+        localStorage.removeItem("dashboard_auth");
         navigate("/auth");
         return;
       }
@@ -126,7 +126,7 @@ const Dashboard = () => {
       setIsInitialized(true);
 
       // Update cache with verified role from database
-      sessionStorage.setItem("dashboard_auth", JSON.stringify({
+      localStorage.setItem("dashboard_auth", JSON.stringify({
         user: { id: currentUser.id, email: currentUser.email },
         role: currentRole, // Always use database role
         name: currentUser.email?.split("@")[0] || "User"
@@ -143,23 +143,23 @@ const Dashboard = () => {
         if (profile?.display_name) {
           setUserName(profile.display_name);
           // Update cache with display name
-          const cached = sessionStorage.getItem("dashboard_auth");
+          const cached = localStorage.getItem("dashboard_auth");
           if (cached) {
             try {
               const parsed = JSON.parse(cached);
               parsed.name = profile.display_name;
-              sessionStorage.setItem("dashboard_auth", JSON.stringify(parsed));
+              localStorage.setItem("dashboard_auth", JSON.stringify(parsed));
             } catch { }
           }
         }
 
         // IMPORTANT: Strictly enforce per-session approval
         if (currentRole && currentRole !== "admin") {
-          // Check if this specific browser session is already authorized
-          const isSessionApproved = sessionStorage.getItem("is_session_approved");
+          // Check if this browser is already authorized
+          const isSessionApproved = localStorage.getItem("is_session_approved");
           
           if (!isSessionApproved) {
-            // New visit/session: Check the database status
+            // New device/session: Check the database status
             const { data: currentApproval } = await (supabase
               .from("login_approvals" as any)
               .select("status")
@@ -168,28 +168,26 @@ const Dashboard = () => {
 
             if (currentApproval?.status !== "approved") {
               // Not approved in DB: Kick out to Auth page
-              console.log("No active approval found for new session. Redirecting...");
-              sessionStorage.removeItem("dashboard_auth");
+              console.log("No active approval found. Redirecting...");
+              localStorage.removeItem("dashboard_auth");
               await supabase.auth.signOut();
               navigate("/auth");
               return;
             }
 
-            // If approved in DB, "consume" it for this session
+            // If approved in DB, "consume" it for this local machine
             const { error: updateError } = await (supabase
               .from("login_approvals" as any)
               .update({ status: "pending", requested_at: new Date().toISOString() })
               .eq("user_id", currentUser.id) as any);
             
             if (updateError) {
-              console.error("Critical: Could not consume approval in DB. This is usually due to RLS policies.", updateError);
-              // If we can't consume it, for safety we should still let them in but log it
-              // Or we can kick them out - for now we mark session approved to avoid refresh loops
-              sessionStorage.setItem("is_session_approved", "true");
+              console.error("Critical: Could not consume approval in DB.", updateError);
+              localStorage.setItem("is_session_approved", "true");
             } else {
-              // Mark this local session as approved so refreshes work
-              sessionStorage.setItem("is_session_approved", "true");
-              console.log("Approval consumed successfully. Session authorized.");
+              // Mark this local machine as approved
+              localStorage.setItem("is_session_approved", "true");
+              console.log("Approval consumed successfully. Browser authorized.");
             }
           }
         }
@@ -197,13 +195,13 @@ const Dashboard = () => {
         console.error("Error in post-auth initialization:", err);
       }
 
-      // Show welcome dialog on first load (check session storage to avoid showing on refresh)
-      const hasSeenWelcome = sessionStorage.getItem("hasSeenWelcome");
+      // Show welcome dialog on first load (check storage to avoid showing on refresh)
+      const hasSeenWelcome = localStorage.getItem("hasSeenWelcome");
       if (!hasSeenWelcome && currentRole) {
         // Delay dialog slightly to let dashboard render first
         setTimeout(() => {
           setShowWelcomeDialog(true);
-          sessionStorage.setItem("hasSeenWelcome", "true");
+          localStorage.setItem("hasSeenWelcome", "true");
         }, 100);
       }
     };
@@ -212,16 +210,15 @@ const Dashboard = () => {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!session) {
-        sessionStorage.removeItem("dashboard_auth");
-        sessionStorage.removeItem("hasSeenWelcome");
-        sessionStorage.removeItem("is_session_approved");
+        localStorage.removeItem("dashboard_auth");
+        localStorage.removeItem("hasSeenWelcome");
+        localStorage.removeItem("is_session_approved");
         navigate("/auth");
       } else if (_event === "SIGNED_IN" || _event === "TOKEN_REFRESHED") {
-        // Only update on actual sign in or token refresh, not on every state change
+        // Only update on actual sign in or token refresh
         setUser(session.user);
         setUserName(session.user.email?.split("@")[0] || "User");
 
-        // Fetch role and profile in parallel (non-blocking)
         Promise.all([
           supabase
             .from("user_roles")
@@ -243,43 +240,35 @@ const Dashboard = () => {
             currentRole = "seo_website";
           }
 
-          // Always update role from database
           if (currentRole) {
             setUserRole(currentRole);
-            // Update cache with verified role
-            sessionStorage.setItem("dashboard_auth", JSON.stringify({
+            localStorage.setItem("dashboard_auth", JSON.stringify({
               user: { id: session.user.id, email: session.user.email },
-              role: currentRole, // Always use database role
+              role: currentRole,
               name: profile?.display_name || session.user.email?.split("@")[0] || "User"
             }));
           } else {
-            // If no role found, clear cache and show error
             setUserRole(null);
-            sessionStorage.removeItem("dashboard_auth");
+            localStorage.removeItem("dashboard_auth");
           }
 
           if (profile?.display_name) {
             setUserName(profile.display_name);
           }
 
-          // Show welcome dialog on login (not on refresh)
-          if (_event === "SIGNED_IN" && currentRole && !sessionStorage.getItem("hasSeenWelcome")) {
+          if (_event === "SIGNED_IN" && currentRole && !localStorage.getItem("hasSeenWelcome")) {
             setShowWelcomeDialog(true);
-            sessionStorage.setItem("hasSeenWelcome", "true");
+            localStorage.setItem("hasSeenWelcome", "true");
           }
-        }).catch(() => {
-          // Ignore role/profile refresh errors
-        });
+        }).catch(() => { });
       }
     });
 
-    // Handle visibility change (tab switch) - don't reload everything
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible" && isInitialized) {
-        // Just verify auth, don't reload everything
         supabase.auth.getUser().then(({ data: { user: currentUser } }) => {
           if (!currentUser) {
-            sessionStorage.removeItem("dashboard_auth");
+            localStorage.removeItem("dashboard_auth");
             navigate("/auth");
           }
         });

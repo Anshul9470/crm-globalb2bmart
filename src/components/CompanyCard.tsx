@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
-import { Building2, Phone, Mail, MapPin, MessageSquare, Trash2, Clock, Loader2, Calendar, User } from "lucide-react";
+import { Building2, Phone, Mail, MapPin, MessageSquare, Trash2, Clock, Loader2, Calendar, User, Pencil, Edit, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CompanyCardProps {
@@ -20,6 +20,9 @@ interface CompanyCardProps {
   userRole?: string;
   hideCategory?: boolean;
   customFooter?: React.ReactNode;
+  onEdit?: () => void;
+  onRequestEdit?: () => void;
+  approvedForEdit?: boolean;
 }
 
 // Map database category names to display names
@@ -95,7 +98,18 @@ const getCategoryColor = (category: string) => {
   }
 };
 
-const CompanyCard = ({ company, onUpdate, canDelete, showAssignedTo, userRole, hideCategory, customFooter }: CompanyCardProps) => {
+const CompanyCard = ({ 
+  company, 
+  onUpdate, 
+  canDelete, 
+  showAssignedTo, 
+  userRole, 
+  hideCategory, 
+  customFooter,
+  onEdit,
+  onRequestEdit,
+  approvedForEdit = false
+}: CompanyCardProps) => {
   const [commentText, setCommentText] = useState("");
   const [category, setCategory] = useState("general");
   const [commentDate, setCommentDate] = useState<string>("");
@@ -583,6 +597,37 @@ const CompanyCard = ({ company, onUpdate, canDelete, showAssignedTo, userRole, h
             {company.owner_name && (
               <p className="text-sm text-muted-foreground font-medium truncate">{company.owner_name}</p>
             )}
+          </div>
+          <div className="flex items-center gap-2">
+            {userRole === "admin" && onEdit && (
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={onEdit}
+                className="h-8 w-8 bg-primary text-white hover:bg-primary hover:text-white transition-colors flex-shrink-0"
+              >
+                <Edit className="h-4 w-4 text-white" />
+              </Button>
+            )}
+            {approvedForEdit ? (
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 bg-green-600 text-white hover:bg-green-600 hover:text-white transition-colors flex-shrink-0 cursor-default"
+                disabled
+              >
+                <CheckCircle2 className="h-4 w-4 text-white" />
+              </Button>
+            ) : onRequestEdit ? (
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={onRequestEdit}
+                className="h-8 w-8 bg-primary text-white hover:bg-primary hover:text-white transition-colors flex-shrink-0"
+              >
+                <Pencil className="h-4 w-4 text-white" />
+              </Button>
+            ) : null}
           </div>
         </div>
       </CardHeader>

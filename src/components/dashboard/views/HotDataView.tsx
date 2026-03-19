@@ -332,8 +332,12 @@ const HotDataView = ({ userId, userRole }: HotDataViewProps) => {
           })).filter((fb: any) => {
             if (fb.deletion_state || fb.deleted_at) return false;
             if (!fb.comments || fb.comments.length === 0) return false;
-            const latestComment = fb.comments[0];
-            return latestComment && latestComment.category === "hot";
+            
+            const sharedAt = fb.shared_at ? new Date(fb.shared_at).getTime() : 0;
+            const latestCommentAt = new Date(fb.comments[0].created_at).getTime();
+            const isWorkedOn = latestCommentAt > sharedAt + 1000;
+            
+            return isWorkedOn && fb.comments[0].category === "hot";
           });
         }
       }
@@ -355,8 +359,8 @@ const HotDataView = ({ userId, userRole }: HotDataViewProps) => {
         })).filter((fb: any) => {
           if (fb.deletion_state || fb.deleted_at) return false;
           if (!fb.comments || fb.comments.length === 0) return false;
-          const latestComment = fb.comments[0];
-          return latestComment && latestComment.category === "hot";
+          // For admins, we just show everything with hot category
+          return fb.comments[0].category === "hot";
         });
       }
     }
@@ -364,11 +368,16 @@ const HotDataView = ({ userId, userRole }: HotDataViewProps) => {
     // Combine and deduplicate
     const companiesHotOnly = activeCompanies.filter((company: any) => {
       if (!company.comments || company.comments.length === 0) return false;
+      
       const latestComment = company.comments.reduce((latest: any, current: any) => {
         if (!latest) return current;
         return new Date(current.created_at) > new Date(latest.created_at) ? current : latest;
       }, null);
-      return latestComment && latestComment.category === "hot";
+
+      const assignedAt = company.assigned_at ? new Date(company.assigned_at).getTime() : 0;
+      const isWorkedOn = latestComment && new Date(latestComment.created_at).getTime() > assignedAt + 1000;
+
+      return isWorkedOn && latestComment.category === "hot";
     });
 
     const combinedRaw = [

@@ -332,8 +332,11 @@ const BlockDataView = ({ userId, userRole }: BlockDataViewProps) => {
           if (!latest) return current;
           return new Date(current.created_at) > new Date(latest.created_at) ? current : latest;
         }, null);
+        const assignedAt = company.assigned_at ? new Date(company.assigned_at).getTime() : 0;
+        const isWorkedOn = latestComment && new Date(latestComment.created_at).getTime() > assignedAt + 1000;
+
         // Ensure we have a valid category and it matches block
-        return latestComment && latestComment.category === "block";
+        return isWorkedOn && latestComment.category === "block";
       });
 
       // Ensure comments are properly sorted for each company
@@ -390,7 +393,7 @@ const BlockDataView = ({ userId, userRole }: BlockDataViewProps) => {
               ...fb,
               shared_at: shareDateMap[fb.id] || null,
               comments: (comments || []).filter((c: any) => c.facebook_data_id === fb.id)
-                .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
             }));
 
             const blockFbData = fbWithComments.filter((fb: any) => {
@@ -412,8 +415,11 @@ const BlockDataView = ({ userId, userRole }: BlockDataViewProps) => {
               const employeeComments = fb.comments.filter((c: any) => c.user_id === userId);
               if (employeeComments.length === 0) return false;
 
-              const latestComment = employeeComments[employeeComments.length - 1]; // comments sorted ascending
-              return latestComment && latestComment.category === "block";
+              const sharedAt = fb.shared_at ? new Date(fb.shared_at).getTime() : 0;
+              const latestCommentAt = new Date(employeeComments[0].created_at).getTime(); 
+              const isWorkedOn = latestCommentAt > sharedAt + 1000;
+
+              return isWorkedOn && employeeComments[0].category === "block";
             });
 
             setFacebookData(blockFbData);

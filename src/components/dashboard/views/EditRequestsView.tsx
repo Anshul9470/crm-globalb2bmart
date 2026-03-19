@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Pencil, CheckCircle2, XCircle } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -24,8 +25,9 @@ import {
 
 interface EditRequest {
   id: string;
-  facebook_data_id: number;
-  facebook_data_share_id: string;
+  facebook_data_id?: number;
+  company_id?: string;
+  facebook_data_share_id?: string;
   requested_by_id: string;
   request_message: string;
   status: "pending" | "approved" | "rejected";
@@ -38,115 +40,152 @@ interface EditRequest {
   email?: string | null;
   products?: string | null;
   services?: string | null;
+  products_services?: string | null;
+  address?: string | null;
   requested_by?: {
     display_name: string | null;
     email: string | null;
   } | null;
-  facebook_data?: {
+  target_data?: {
     name: string | null;
     email: string | null;
   } | null;
+  original_data?: any; // To store the full current record for comparison
+  is_company?: boolean;
 }
 
 const EditRequestsView = () => {
-  const [requests, setRequests] = useState<EditRequest[]>([]);
+  const [facebookRequests, setFacebookRequests] = useState<EditRequest[]>([]);
+  const [companyRequests, setCompanyRequests] = useState<EditRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRequest, setSelectedRequest] = useState<EditRequest | null>(null);
   const [approving, setApproving] = useState(false);
 
   useEffect(() => {
-    fetchEditRequests();
+    fetchAllRequests();
   }, []);
 
-  const fetchEditRequests = async () => {
+  const fetchAllRequests = async () => {
     setLoading(true);
+    await Promise.all([
+      fetchFacebookEditRequests(),
+      fetchCompanyEditRequests()
+    ]);
+    setLoading(false);
+  };
+
+  const fetchFacebookEditRequests = async () => {
     try {
-      // First, fetch the edit requests
       const { data: requestsData, error: requestsError } = await (supabase
         .from("facebook_data_edit_requests" as any)
         .select("*")
         .order("created_at", { ascending: false }) as any);
 
+      if (requestsError) throw requestsError;
+
+      if (!requestsData || requestsData.length === 0) {
+        setFacebookRequests([]);
+        return;
+      }
+
+      const enriched = await enrichRequests(requestsData, "facebook_data");
+      setFacebookRequests(enriched);
+    } catch (error: any) {
+      console.error("Error fetching Facebook edit requests:", error);
+      setFacebookRequests([]);
+    }
+  };
+
+  const fetchCompanyEditRequests = async () => {
+    try {
+      const { data: requestsData, error: requestsError } = await (supabase
+        .from("company_edit_requests" as any)
+        .select("*")
+        .order("created_at", { ascending: false }) as any);
+
       if (requestsError) {
-        console.error("Error fetching edit requests:", requestsError);
-        
-        // Check if table doesn't exist
-        if (requestsError.code === "PGRST205" || requestsError.message?.includes("could not find") || requestsError.message?.includes("does not exist")) {
-          toast.error("The edit requests table is not found. Please run the SQL script to create it.", { duration: 10000 });
-          setRequests([]);
-          setLoading(false);
+        if (requestsError.code === "PGRST204") {
+          console.warn("company_edit_requests table not found");
           return;
         }
-        
         throw requestsError;
       }
 
       if (!requestsData || requestsData.length === 0) {
-        setRequests([]);
-        setLoading(false);
+        setCompanyRequests([]);
         return;
       }
 
-      // Fetch user profiles for requested_by_id
-      const userIds = [...new Set(requestsData.map((r: any) => String(r.requested_by_id)))] as string[];
-      const { data: profilesData } = await supabase
-        .from("profiles")
-        .select("id, display_name, email")
-        .in("id", userIds);
-
-      // Fetch Facebook data
-      const facebookDataIds = [...new Set(requestsData.map((r: any) => r.facebook_data_id))];
-      let facebookDataMap = new Map();
-      
-      try {
-        const { data: fbData } = await (supabase
-          .from("facebook_data" as any)
-          .select("id, name, email")
-          .in("id", facebookDataIds) as any);
-        
-        if (fbData) {
-          fbData.forEach((item: any) => {
-            facebookDataMap.set(item.id, item);
-          });
-        }
-      } catch (fbError: any) {
-        console.warn("Could not fetch Facebook data:", fbError);
-        // Continue without Facebook data
-      }
-
-      // Combine the data
-      const profilesMap = new Map();
-      if (profilesData) {
-        profilesData.forEach((profile: any) => {
-          profilesMap.set(profile.id, profile);
-        });
-      }
-
-      const enrichedRequests = requestsData.map((request: any) => ({
-        ...request,
-        requested_by: profilesMap.get(request.requested_by_id) || null,
-        facebook_data: facebookDataMap.get(request.facebook_data_id) || null,
-      }));
-
-      setRequests(enrichedRequests);
+      const enriched = await enrichRequests(requestsData, "companies");
+      setCompanyRequests(enriched.map(r => ({ ...r, is_company: true })));
     } catch (error: any) {
-      console.error("Error fetching edit requests:", error);
-      toast.error(error.message || "Failed to load edit requests");
-      setRequests([]);
-    } finally {
-      setLoading(false);
+      console.error("Error fetching Company edit requests:", error);
+      setCompanyRequests([]);
     }
   };
 
+  const enrichRequests = async (requestsData: any[], type: "facebook_data" | "companies") => {
+    // Fetch user profiles
+    const userIds = [...new Set(requestsData.map((r: any) => String(r.requested_by_id)))] as string[];
+    const { data: profilesData } = await supabase
+      .from("profiles")
+      .select("id, display_name, email")
+      .in("id", userIds);
+
+    const profilesMap = new Map();
+    if (profilesData) {
+      profilesData.forEach((profile: any) => {
+        profilesMap.set(profile.id, profile);
+      });
+    }
+
+    // Fetch target data
+    const targetIds = [...new Set(requestsData.map((r: any) => type === "facebook_data" ? r.facebook_data_id : r.company_id))];
+    let targetMap = new Map();
+    
+    try {
+      const selectFields = type === "facebook_data" 
+        ? "id, name, email, phone, company_name, owner_name, products, services"
+        : "id, company_name, owner_name, email, phone, products_services, address";
+
+      const { data: targets } = await (supabase
+        .from(type as any)
+        .select(selectFields)
+        .in("id", targetIds) as any);
+      
+      if (targets) {
+        targets.forEach((item: any) => {
+          targetMap.set(item.id, {
+            name: type === "facebook_data" ? (item.company_name || item.name) : item.company_name,
+            email: item.email,
+            full_record: item // Store the full record for comparison
+          });
+        });
+      }
+    } catch (err) {
+      console.warn(`Could not fetch target data for ${type}:`, err);
+    }
+
+    return requestsData.map((request: any) => {
+      const target = targetMap.get(type === "facebook_data" ? request.facebook_data_id : request.company_id);
+      return {
+        ...request,
+        requested_by: profilesMap.get(request.requested_by_id) || null,
+        target_data: target ? { name: target.name, email: target.email } : null,
+        original_data: target ? target.full_record : null
+      };
+    });
+  };
+
   const handleApprove = async (request: EditRequest) => {
-    console.log("🔎 Approving edit request:", request);
     setSelectedRequest(request);
+    const typeLabel = request.is_company ? "Company" : "Facebook";
     if (
       confirm(
-        `Approve edit request from ${request.requested_by?.display_name || "employee"}? The submitted details will be applied directly to this Facebook data.`
+        `Approve ${typeLabel} edit request from ${request.requested_by?.display_name || "employee"}?`
       )
     ) {
-      await updateRequestStatus(request.id, "approved");
+      await updateRequestStatus(request, "approved");
     }
   };
 
@@ -156,101 +195,70 @@ const EditRequestsView = () => {
         `Reject edit request from ${request.requested_by?.display_name || "employee"}?`
       )
     ) {
-      await updateRequestStatus(request.id, "rejected");
+      await updateRequestStatus(request, "rejected");
     }
   };
 
-  const updateRequestStatus = async (requestId: string, status: "approved" | "rejected") => {
+  const updateRequestStatus = async (request: EditRequest, status: "approved" | "rejected") => {
     setApproving(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const request = requests.find((r) => r.id === requestId);
-      if (!request) throw new Error("Edit request not found");
-
-      // If approving, first apply the submitted details directly to facebook_data
       if (status === "approved") {
-        console.log("📝 Applying approved edit. Original request values:", {
-          facebook_data_id: request.facebook_data_id,
-          facebook_data_share_id: request.facebook_data_share_id,
-          company_name: request.company_name,
-          owner_name: request.owner_name,
-          phone: request.phone,
-          email: request.email,
-          products: request.products,
-          services: request.services,
-        });
-
-        // Extra safety: resolve the real facebook_data_id via facebook_data_shares
-        let targetFacebookDataId = request.facebook_data_id;
-        try {
-          const { data: shareRow, error: shareError } = await (supabase
-            .from("facebook_data_shares" as any)
-            .select("facebook_data_id")
-            .eq("id", request.facebook_data_share_id)
-            .maybeSingle() as any);
-
-          if (shareError) {
-            console.warn("⚠️ Could not resolve facebook_data_id from facebook_data_shares:", shareError);
-          } else if (shareRow?.facebook_data_id) {
-            targetFacebookDataId = shareRow.facebook_data_id;
-          }
-        } catch (e) {
-          console.warn("⚠️ Exception while resolving facebook_data_id from shares:", e);
-        }
-
-        console.log("🧩 Using facebook_data_id for update:", targetFacebookDataId);
-
         const updatePayload: any = {
           company_name: request.company_name ?? null,
           owner_name: request.owner_name ?? null,
           phone: request.phone ?? null,
           email: request.email ?? null,
-          products: request.products ?? null,
-          services: request.services ?? null,
         };
 
-        const { data: updatedRows, error: fbUpdateError } = await (supabase
-          .from("facebook_data" as any)
-          .update(updatePayload)
-          .eq("id", targetFacebookDataId)
-          .select("id, company_name, owner_name, phone, email, products, services") as any);
+        if (request.is_company) {
+          updatePayload.products_services = request.products_services ?? null;
+          updatePayload.address = request.address ?? null;
+          
+          await supabase
+            .from("companies")
+            .update(updatePayload)
+            .eq("id", request.company_id);
+        } else {
+          updatePayload.products = request.products ?? null;
+          updatePayload.services = request.services ?? null;
+          
+          let targetFbId = request.facebook_data_id;
+          if (request.facebook_data_share_id) {
+            const { data: share } = await (supabase
+              .from("facebook_data_shares" as any)
+              .select("facebook_data_id")
+              .eq("id", request.facebook_data_share_id)
+              .maybeSingle() as any);
+            if (share?.facebook_data_id) targetFbId = share.facebook_data_id;
+          }
 
-        if (fbUpdateError) {
-          console.error("Error applying approved edit to facebook_data:", fbUpdateError);
-          throw new Error(fbUpdateError.message || "Failed to apply approved edit to Facebook data");
-        }
-
-        if (!updatedRows || updatedRows.length === 0) {
-          console.warn("⚠️ No facebook_data rows were updated for edit request:", {
-            requestId,
-            facebook_data_id: request.facebook_data_id,
-          });
-          toast.error("No matching Facebook data record was found to update. Please check facebook_data_id.");
+          await (supabase
+            .from("facebook_data" as any)
+            .update(updatePayload)
+            .eq("id", targetFbId) as any);
         }
       }
 
-      const updateData: any = {
+      const updateData = {
         status,
         approved_by_id: user.id,
         approved_at: new Date().toISOString(),
       };
 
-      const { error } = await (supabase
-        .from("facebook_data_edit_requests" as any)
+      const table = request.is_company ? "company_edit_requests" : "facebook_data_edit_requests";
+      await (supabase
+        .from(table as any)
         .update(updateData)
-        .eq("id", requestId) as any);
+        .eq("id", request.id) as any);
 
-      if (error) throw error;
-
-      toast.success(
-        `Edit request ${status === "approved" ? "approved" : "rejected"} successfully`
-      );
-      fetchEditRequests();
+      toast.success(`Request ${status} successfully`);
+      fetchAllRequests();
     } catch (error: any) {
-      console.error("Error updating edit request:", error);
-      toast.error(error.message || "Failed to update edit request");
+      console.error("Error updating request:", error);
+      toast.error(error.message || "Failed to update request");
     } finally {
       setApproving(false);
       setSelectedRequest(null);
@@ -282,330 +290,250 @@ const EditRequestsView = () => {
     }
   };
 
-  const pendingRequests = requests.filter((r) => r.status === "pending");
-  const processedRequests = requests.filter((r) => r.status !== "pending");
+  const renderRequestTable = (requests: EditRequest[]) => {
+    const pending = requests.filter(r => r.status === "pending");
+    const processed = requests.filter(r => r.status !== "pending");
 
-  if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="space-y-6">
+        {pending.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Badge variant="outline" className="bg-yellow-500 text-white">{pending.length}</Badge>
+                Pending Requests
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Employee</TableHead>
+                      <TableHead>Target Data</TableHead>
+                      <TableHead>Message</TableHead>
+                      <TableHead>Requested At</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pending.map((req) => (
+                      <TableRow key={req.id}>
+                        <TableCell>
+                          <div className="font-medium">{req.requested_by?.display_name || "Unknown"}</div>
+                          <div className="text-xs text-muted-foreground">{req.requested_by?.email}</div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-medium">{req.target_data?.name || "N/A"}</div>
+                          <div className="text-xs text-muted-foreground">{req.target_data?.email || "N/A"}</div>
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate">{req.request_message || "No message"}</TableCell>
+                        <TableCell>{new Date(req.created_at).toLocaleString()}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button variant="outline" size="sm" onClick={() => setSelectedRequest(req)}>View</Button>
+                            <Button variant="default" size="sm" onClick={() => handleApprove(req)} className="bg-green-600 hover:bg-green-700">Approve</Button>
+                            <Button variant="destructive" size="sm" onClick={() => handleReject(req)}>Reject</Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {processed.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Processed Requests ({processed.length})</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Employee</TableHead>
+                      <TableHead>Target Data</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Processed At</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {processed.map((req) => (
+                      <TableRow key={req.id}>
+                        <TableCell>
+                          <div className="font-medium">{req.requested_by?.display_name || "Unknown"}</div>
+                        </TableCell>
+                        <TableCell>{req.target_data?.name || "N/A"}</TableCell>
+                        <TableCell>{getStatusBadge(req.status)}</TableCell>
+                        <TableCell>{req.approved_at ? new Date(req.approved_at).toLocaleString() : "N/A"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {requests.length === 0 && (
+          <div className="text-center py-12 text-muted-foreground">No requests found here.</div>
+        )}
       </div>
     );
+  };
+
+  if (loading) {
+    return <div className="flex items-center justify-center min-h-[400px]"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-bold tracking-tight text-white">Facebook Data Edit Requests</h2>
-          <p className="text-muted-foreground mt-1 text-white/80">
-            Review and approve/reject employee requests to edit Facebook data
-          </p>
+          <h2 className="text-3xl font-bold tracking-tight text-white">Edit Requests Approval</h2>
+          <p className="text-muted-foreground mt-1 text-white/80">Manage employee requests to update data</p>
         </div>
       </div>
 
-      {/* Pending Requests */}
-      {pendingRequests.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Badge variant="outline" className="bg-yellow-500 text-white">
-                {pendingRequests.length}
-              </Badge>
-              Pending Requests
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Employee</TableHead>
-                    <TableHead>Facebook Data</TableHead>
-                    <TableHead>Request Message</TableHead>
-                    <TableHead>Requested At</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pendingRequests.map((request) => (
-                    <TableRow key={request.id}>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">
-                            {request.requested_by?.display_name || "Unknown"}
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            {request.requested_by?.email}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">
-                            {request.facebook_data?.name || "N/A"}
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            {request.facebook_data?.email || "N/A"}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="max-w-md truncate" title={request.request_message}>
-                          {request.request_message || "No message"}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {new Date(request.created_at).toLocaleString()}
-                      </TableCell>
-                      <TableCell>{getStatusBadge(request.status)}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setSelectedRequest(request)}
-                          >
-                            View Details
-                          </Button>
-                          <Button
-                            variant="default"
-                            size="sm"
-                            onClick={() => handleApprove(request)}
-                            disabled={approving}
-                            className="bg-green-600 hover:bg-green-700"
-                          >
-                            <CheckCircle2 className="h-4 w-4 mr-1" />
-                            Approve
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={() => handleReject(request)}
-                            disabled={approving}
-                          >
-                            <XCircle className="h-4 w-4 mr-1" />
-                            Reject
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <Tabs defaultValue="facebook" className="w-full">
+        <TabsList className="bg-white/10 text-white">
+          <TabsTrigger value="facebook" className="data-[state=active]:bg-primary">Facebook Data ({facebookRequests.length})</TabsTrigger>
+          <TabsTrigger value="company" className="data-[state=active]:bg-primary">Company Data ({companyRequests.length})</TabsTrigger>
+        </TabsList>
+        <TabsContent value="facebook" className="mt-6">
+          {renderRequestTable(facebookRequests)}
+        </TabsContent>
+        <TabsContent value="company" className="mt-6">
+          {renderRequestTable(companyRequests)}
+        </TabsContent>
+      </Tabs>
 
-      {/* Processed Requests */}
-      {processedRequests.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              Processed Requests ({processedRequests.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Employee</TableHead>
-                    <TableHead>Facebook Data</TableHead>
-                    <TableHead>Request Message</TableHead>
-                    <TableHead>Requested At</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {processedRequests.map((request) => (
-                    <TableRow key={request.id}>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">
-                            {request.requested_by?.display_name || "Unknown"}
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            {request.requested_by?.email}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">
-                            {request.facebook_data?.name || "N/A"}
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            {request.facebook_data?.email || "N/A"}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="max-w-md truncate" title={request.request_message}>
-                          {request.request_message}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {new Date(request.created_at).toLocaleString()}
-                      </TableCell>
-                      <TableCell>{getStatusBadge(request.status)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* View Details Dialog */}
-      <Dialog open={!!selectedRequest && !approving} onOpenChange={(open) => !open && setSelectedRequest(null)}>
+      {/* Details Dialog */}
+      <Dialog open={!!selectedRequest} onOpenChange={(o) => !o && setSelectedRequest(null)}>
         <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-white">Edit Request Details</DialogTitle>
-            <DialogDescription className="text-white/80">
-              Review the data submitted by the employee
-            </DialogDescription>
           </DialogHeader>
           {selectedRequest && (
             <div className="space-y-6 py-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-4 border-b border-white/10 pb-4">
                 <div>
-                  <p className="text-sm font-semibold text-white/70">Employee</p>
-                  <p className="text-base font-medium text-white">
-                    {selectedRequest.requested_by?.display_name || "Unknown"}
-                  </p>
-                  <p className="text-sm text-white/70">
-                    {selectedRequest.requested_by?.email}
-                  </p>
+                  <p className="text-xs font-semibold text-white/50 uppercase">Requested By</p>
+                  <p className="text-white font-medium">{selectedRequest.requested_by?.display_name || "Unknown"}</p>
+                  <p className="text-xs text-white/70">{selectedRequest.requested_by?.email}</p>
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-white/70">Status</p>
+                  <p className="text-xs font-semibold text-white/50 uppercase">Status</p>
                   <div className="mt-1">{getStatusBadge(selectedRequest.status)}</div>
                 </div>
               </div>
 
-              <div className="border-t border-white/20 pt-4">
-                <p className="text-sm font-semibold text-white/70 mb-3">Submitted Data</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <p className="text-sm font-semibold text-white">Company Name</p>
-                    <p className="text-base p-2 bg-white/10 rounded text-white">
-                      {selectedRequest.company_name || "N/A"}
-                    </p>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-white">Data Comparison</p>
+                  <div className="flex gap-4 text-[10px] font-bold uppercase tracking-wider">
+                    <span className="text-white/40">Current Data</span>
+                    <span className="text-primary-foreground bg-primary px-1.5 rounded">Proposed Change</span>
                   </div>
-                  <div className="space-y-2">
-                    <p className="text-sm font-semibold text-white">Owner Name</p>
-                    <p className="text-base p-2 bg-white/10 rounded text-white">
-                      {selectedRequest.owner_name || "N/A"}
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-sm font-semibold text-white">Phone Number</p>
-                    <p className="text-base p-2 bg-white/10 rounded text-white">
-                      {selectedRequest.phone || "N/A"}
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-sm font-semibold text-white">Email Address</p>
-                    <p className="text-base p-2 bg-white/10 rounded text-white">
-                      {selectedRequest.email || "N/A"}
-                    </p>
-                  </div>
-                  <div className="space-y-2 col-span-2">
-                    <p className="text-sm font-semibold text-white">Products</p>
-                    <p className="text-base p-2 bg-white/10 rounded min-h-[60px] text-white">
-                      {selectedRequest.products || "N/A"}
-                    </p>
-                  </div>
-                  <div className="space-y-2 col-span-2">
-                    <p className="text-sm font-semibold text-white">Services</p>
-                    <p className="text-base p-2 bg-white/10 rounded min-h-[60px] text-white">
-                      {selectedRequest.services || "N/A (Optional)"}
-                    </p>
-                  </div>
+                </div>
+                
+                <div className="rounded-lg border border-white/10 overflow-hidden bg-white/5">
+                  <Table>
+                    <TableHeader className="bg-white/5">
+                      <TableRow className="hover:bg-transparent border-white/10">
+                        <TableHead className="text-white/50 w-[140px]">Field</TableHead>
+                        <TableHead className="text-white/50">Current Value</TableHead>
+                        <TableHead className="text-white/50">Requested Value</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {[
+                        { 
+                          label: "Company Name", 
+                          old: selectedRequest.is_company ? selectedRequest.original_data?.company_name : (selectedRequest.original_data?.company_name || selectedRequest.original_data?.name),
+                          new: selectedRequest.company_name 
+                        },
+                        { 
+                          label: "Owner Name", 
+                          old: selectedRequest.original_data?.owner_name,
+                          new: selectedRequest.owner_name 
+                        },
+                        { 
+                          label: "Phone", 
+                          old: selectedRequest.original_data?.phone,
+                          new: selectedRequest.phone 
+                        },
+                        { 
+                          label: "Email", 
+                          old: selectedRequest.original_data?.email,
+                          new: selectedRequest.email 
+                        },
+                        { 
+                          label: selectedRequest.is_company ? "Products/Services" : "Products", 
+                          old: selectedRequest.is_company ? selectedRequest.original_data?.products_services : selectedRequest.original_data?.products,
+                          new: selectedRequest.products || selectedRequest.products_services 
+                        },
+                        { 
+                          label: "Services", 
+                          old: selectedRequest.original_data?.services,
+                          new: selectedRequest.services 
+                        },
+                        { 
+                          label: "Address", 
+                          old: selectedRequest.original_data?.address,
+                          new: selectedRequest.address 
+                        }
+                      ].map((field, i) => {
+                        const hasChange = field.new && field.old !== field.new;
+                        if (!field.new && !field.old) return null;
+                        
+                        return (
+                          <TableRow key={i} className="border-white/5 hover:bg-white/5">
+                            <TableCell className="font-medium text-white/70 text-xs">{field.label}</TableCell>
+                            <TableCell className="text-red-400/60 text-xs italic line-through">
+                              {field.old || "Empty"}
+                            </TableCell>
+                            <TableCell className={`text-sm font-semibold ${hasChange ? "text-green-400" : "text-white/20"}`}>
+                              {field.new || "No change"}
+                              {hasChange && (
+                                <Badge variant="outline" className="ml-2 h-4 px-1 text-[8px] bg-green-500/10 text-green-500 border-green-500/20">
+                                  CHANGED
+                                </Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
                 </div>
               </div>
 
               {selectedRequest.request_message && (
-                <div className="border-t border-white/20 pt-4">
-                  <p className="text-sm font-semibold text-white/70 mb-2">Additional Notes</p>
-                  <p className="text-base p-2 bg-white/10 rounded text-white">
-                    {selectedRequest.request_message}
-                  </p>
+                <div className="pt-4 border-t border-white/10">
+                  <p className="text-xs text-white/50 uppercase mb-2">Message from Employee</p>
+                  <p className="text-sm italic text-white/80">"{selectedRequest.request_message}"</p>
                 </div>
               )}
-
-              <div className="border-t border-white/20 pt-4">
-                <p className="text-sm text-white/70">
-                  Requested at: {new Date(selectedRequest.created_at).toLocaleString()}
-                </p>
-                {selectedRequest.approved_at && (
-                  <p className="text-sm text-white/70">
-                    {selectedRequest.status === "approved" ? "Approved" : "Rejected"} at:{" "}
-                    {new Date(selectedRequest.approved_at).toLocaleString()}
-                  </p>
-                )}
-              </div>
             </div>
           )}
           <DialogFooter>
-            {selectedRequest && selectedRequest.status === "pending" && (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={() => setSelectedRequest(null)}
-                >
-                  Close
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    handleReject(selectedRequest);
-                    setSelectedRequest(null);
-                  }}
-                  disabled={approving}
-                >
-                  <XCircle className="h-4 w-4 mr-1" />
-                  Reject
-                </Button>
-                <Button
-                  variant="default"
-                  onClick={() => {
-                    handleApprove(selectedRequest);
-                    setSelectedRequest(null);
-                  }}
-                  disabled={approving}
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  <CheckCircle2 className="h-4 w-4 mr-1" />
-                  Approve
-                </Button>
-              </>
+            {selectedRequest?.status === "pending" && (
+              <div className="flex gap-2">
+                <Button variant="destructive" onClick={() => handleReject(selectedRequest)} disabled={approving}>Reject</Button>
+                <Button variant="default" onClick={() => handleApprove(selectedRequest)} disabled={approving} className="bg-green-600">Approve & Apply</Button>
+              </div>
             )}
-            {selectedRequest && selectedRequest.status !== "pending" && (
-              <Button onClick={() => setSelectedRequest(null)}>Close</Button>
-            )}
+            <Button variant="outline" onClick={() => setSelectedRequest(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {requests.length === 0 && (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-16">
-            <Pencil className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No Edit Requests</h3>
-            <p className="text-sm text-muted-foreground text-center max-w-sm">
-              There are no Facebook data edit requests at this time.
-            </p>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 };
 
 export default EditRequestsView;
-

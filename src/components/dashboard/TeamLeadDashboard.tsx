@@ -431,7 +431,7 @@ const TeamLeadDashboard = ({ user }: TeamLeadDashboardProps) => {
       onLogout={handleLogout}
     >
       {currentView === "assigned" && <AssignedDataView userId={user.id} userRole="team_lead" />}
-      {currentView === "search" && <SearchDataView />}
+      {currentView === "search" && <SearchDataView userRole="team_lead" />}
       {currentView === "today" && <TodayDataView userId={user.id} userRole="team_lead" />}
       {currentView === "followup" && <FollowUpDataView userId={user.id} userRole="team_lead" />}
       {currentView === "hot" && <HotDataView userId={user.id} userRole="team_lead" />}

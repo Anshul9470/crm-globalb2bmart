@@ -412,62 +412,28 @@ const DataRequestsView = () => {
         .from("companies")
         .select("id")
         .is("assigned_to_id", null)
-        .is("assigned_at", null)
         .is("deleted_at", null)
         .order("created_at", { ascending: true })
-        .limit(Math.max(finalBatchSize * 10, 500)); // Large pool = always enough fresh unique data
+        .limit(Math.max(finalBatchSize * 10, 1000)); // Large pool = always enough fresh unique data
 
       if (companiesError) throw companiesError;
 
-      // 2.5) Filter out companies that this employee has previously worked on
-      // Check if employee has any comments on these companies
-      if (!unassignedCompanies || unassignedCompanies.length === 0) {
-        const companiesToAssign: any[] = [];
-        toast.warning("Request approved but no companies available to assign.");
-        fetchRequests();
-        return;
-      }
+      // Filter out companies that this employee has currently assigned (just in case they were already assigned)
+      const freshCompaniesToAssign = (unassignedCompanies || []).slice(0, finalBatchSize);
 
-      const unassignedCompanyIds = unassignedCompanies.map((c: any) => c.id);
-
-      // CRITICAL: Ensure each person gets UNIQUE data that has NEVER been worked on by ANYONE.
-      // Fetch ANY comments for these companies (not just for the current employee).
-      const { data: allComments, error: commentsError } = await supabase
-        .from("comments")
-        .select("company_id")
-        .in("company_id", unassignedCompanyIds);
-
-      if (commentsError) {
-        console.error("Error fetching comment history:", commentsError);
-        // Continue on error, but uniqueness might be compromised if comment fetch fails
-      }
-
-      // Create a Set of company IDs that have ANY comments from ANYONE
-      const previouslyWorkedCompanyIds = new Set(
-        (allComments || []).map((comment: any) => comment.company_id)
-      );
-
-      // Filter out companies that have ANY previous activity
-      const freshCompaniesToAssign = unassignedCompanies.filter((company: any) =>
-        !previouslyWorkedCompanyIds.has(company.id)
-      );
-
-      console.log("🔍 Enforcing unique data assignment:", {
+      console.log("🔍 Assigning data:", {
         employeeId: request.requested_by_id,
-        employeeName: request.requested_by?.display_name,
-        totalUnassignedFetched: unassignedCompanies.length,
-        companiesWithPreviousActivity: previouslyWorkedCompanyIds.size,
-        availableFreshCompanies: freshCompaniesToAssign.length,
-        willAssign: Math.min(freshCompaniesToAssign.length, finalBatchSize)
+        availableUnassigned: unassignedCompanies?.length || 0,
+        willAssign: freshCompaniesToAssign.length
       });
 
       // Limit to batch size
-      const companiesToAssign = freshCompaniesToAssign.slice(0, finalBatchSize);
+      const companiesToAssign = freshCompaniesToAssign;
       const nowIso = new Date().toISOString();
 
       // Check if we have companies to assign
       if (companiesToAssign.length === 0) {
-        toast.warning("Request approved but no fresh companies were available to assign.");
+        toast.warning("Request approved but no unassigned companies were available in the database.");
         fetchRequests();
         return;
       }

@@ -7,6 +7,9 @@ import FacebookDataCard from "./FacebookDataCard";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 interface AllCompaniesViewProps {
   userRole?: string;
@@ -23,6 +26,22 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
   const [selectMode, setSelectMode] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
+  // Edit request states
+  const [editRequestDialogOpen, setEditRequestDialogOpen] = useState(false);
+  const [requestingEditData, setRequestingEditData] = useState<any>(null);
+  const [editRequestMessage, setEditRequestMessage] = useState("");
+  const [editRequestFormData, setEditRequestFormData] = useState({
+    company_name: "",
+    owner_name: "",
+    phone: "",
+    email: "",
+    products: "",
+    services: ""
+  });
+  const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [approvedCompanyEditRequests, setApprovedCompanyEditRequests] = useState<Set<string>>(new Set());
+  const [approvedEditRequests, setApprovedEditRequests] = useState<Set<number>>(new Set());
+
   // Employees/TL list for assignment
   const [employees, setEmployees] = useState<any[]>([]);
   const [assigning, setAssigning] = useState(false);
@@ -30,6 +49,8 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
   useEffect(() => {
     fetchAllCompanies();
     fetchEmployees();
+    fetchApprovedCompanyEditRequests();
+    fetchApprovedEditRequests();
   }, []);
 
   // Server-side search with debounce
@@ -62,6 +83,130 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
           role: item.role,
         }));
       setEmployees(mapped);
+    }
+  };
+
+  const fetchApprovedCompanyEditRequests = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data, error } = await (supabase
+        .from("company_edit_requests" as any)
+        .select("company_id")
+        .eq("requested_by_id", user.id)
+        .eq("status", "approved") as any);
+
+      if (error) {
+        console.error("Error fetching approved company edit requests:", error);
+        return;
+      }
+
+      const approvedIds = new Set<string>((data || []).map((r: any) => String(r.company_id)));
+      setApprovedCompanyEditRequests(approvedIds);
+    } catch (error) {
+      console.error("Error in fetchApprovedCompanyEditRequests:", error);
+    }
+  };
+
+  const fetchApprovedEditRequests = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data, error } = await (supabase
+        .from("facebook_data_edit_requests" as any)
+        .select("facebook_data_id")
+        .eq("requested_by_id", user.id)
+        .eq("status", "approved") as any);
+
+      if (error) {
+        console.error("Error fetching approved edit requests:", error);
+        return;
+      }
+
+      const approvedIds = new Set<number>((data || []).map((r: any) => Number(r.facebook_data_id)));
+      setApprovedEditRequests(approvedIds);
+    } catch (error) {
+      console.error("Error in fetchApprovedEditRequests:", error);
+    }
+  };
+
+  const handleRequestEditClick = (data: any) => {
+    setRequestingEditData(data);
+    setEditRequestMessage("");
+    setEditRequestFormData({
+      company_name: data.company_name || data.name || "",
+      owner_name: data.owner_name || "",
+      phone: data.phone || "",
+      email: data.email || "",
+      products: data.products || data.products_services || "",
+      services: data.services || ""
+    });
+    setEditRequestDialogOpen(true);
+  };
+
+  const handleSubmitEditRequest = async () => {
+    if (!requestingEditData) return;
+
+    if (!editRequestFormData.company_name.trim() ||
+      !editRequestFormData.owner_name.trim() ||
+      !editRequestFormData.phone.trim() ||
+      !editRequestFormData.email.trim() ||
+      !editRequestFormData.products.trim()) {
+      toast.error("Please fill in all required fields");
+      return;
+    }
+
+    setSubmittingRequest(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("User not authenticated");
+
+      const isFb = !!requestingEditData.is_facebook_data;
+
+      if (isFb) {
+        const { error } = await (supabase
+          .from("facebook_data_edit_requests" as any)
+          .insert([{
+            facebook_data_id: requestingEditData.id,
+            requested_by_id: user.id,
+            request_message: editRequestMessage.trim() || "Edit request from Admin All Companies view",
+            status: "pending",
+            name: editRequestFormData.company_name.trim(),
+            email: editRequestFormData.email.trim(),
+            phone: editRequestFormData.phone.trim(),
+            owner_name: editRequestFormData.owner_name.trim(),
+            company_name: editRequestFormData.company_name.trim(),
+            products: editRequestFormData.products.trim(),
+            services: editRequestFormData.services.trim(),
+          }]) as any);
+        if (error) throw error;
+      } else {
+        const { error } = await (supabase
+          .from("company_edit_requests" as any)
+          .insert([{
+            company_id: requestingEditData.id,
+            requested_by_id: user.id,
+            request_message: editRequestMessage.trim() || "Edit request from Admin All Companies view",
+            status: "pending",
+            company_name: editRequestFormData.company_name.trim(),
+            owner_name: editRequestFormData.owner_name.trim(),
+            phone: editRequestFormData.phone.trim(),
+            email: editRequestFormData.email.trim(),
+            products_services: editRequestFormData.products.trim(),
+          }]) as any);
+        if (error) throw error;
+      }
+
+      toast.success("Edit request sent successfully.");
+      setEditRequestDialogOpen(false);
+      setRequestingEditData(null);
+      if (isFb) fetchApprovedEditRequests();
+      else fetchApprovedCompanyEditRequests();
+    } catch (error: any) {
+      console.error("Error processing request:", error);
+      toast.error(error.message || "Failed to process request");
+    } finally {
+      setSubmittingRequest(false);
     }
   };
 
@@ -436,6 +581,8 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
                       userRole={userRole}
                       onDelete={() => { }}
                       showAssignedTo={true}
+                      onRequestEdit={() => handleRequestEditClick(company)}
+                      approvedForEdit={approvedEditRequests.has(Number(company.id))}
                     />
                   ) : (
                     <CompanyCard
@@ -444,6 +591,8 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
                       showAssignedTo={true}
                       canDelete={userRole === "admin"}
                       userRole={userRole}
+                      onRequestEdit={() => handleRequestEditClick(company)}
+                      approvedForEdit={approvedCompanyEditRequests.has(String(company.id))}
                     />
                   )}
                   </div>
@@ -503,6 +652,78 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
           </div>
         </div>
       )}
+
+      {/* Edit Request Dialog */}
+      <Dialog open={editRequestDialogOpen} onOpenChange={setEditRequestDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Request Data Edit</DialogTitle>
+            <DialogDescription>
+              Submit corrected information. Even for admins, this will create an approval request for tracking and verification.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="company_name">Name / Company Name *</Label>
+              <Input
+                id="company_name"
+                value={editRequestFormData.company_name}
+                onChange={(e) => setEditRequestFormData({ ...editRequestFormData, company_name: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="owner_name">Owner Name *</Label>
+              <Input
+                id="owner_name"
+                value={editRequestFormData.owner_name}
+                onChange={(e) => setEditRequestFormData({ ...editRequestFormData, owner_name: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="phone">Phone Number *</Label>
+              <Input
+                id="phone"
+                value={editRequestFormData.phone}
+                onChange={(e) => setEditRequestFormData({ ...editRequestFormData, phone: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="email">Email Address *</Label>
+              <Input
+                id="email"
+                type="email"
+                value={editRequestFormData.email}
+                onChange={(e) => setEditRequestFormData({ ...editRequestFormData, email: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="products">Products / Services *</Label>
+              <Input
+                id="products"
+                value={editRequestFormData.products}
+                onChange={(e) => setEditRequestFormData({ ...editRequestFormData, products: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="message">Note for Review (Optional)</Label>
+              <Textarea
+                id="message"
+                placeholder="Details about the changes..."
+                value={editRequestMessage}
+                onChange={(e) => setEditRequestMessage(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditRequestDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSubmitEditRequest} disabled={submittingRequest}>
+              {submittingRequest ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Submit Request"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

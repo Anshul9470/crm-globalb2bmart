@@ -205,7 +205,7 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
 
         const h = header.trim().toLowerCase();
         
-        // Smarter Company Name detection
+        // Smarter Company Name detection (handles 'company', 'company_name', 'business', 'organization', 'name')
         if (!obj.company_name && (h.includes("company") || h.includes("business") || h.includes("organization") || h === "name")) {
           obj.company_name = val;
         } 
@@ -213,11 +213,43 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
         else if (!obj.owner_name && (h.includes("owner") || (h.includes("person") && !h.includes("contact")))) {
           obj.owner_name = val;
         }
-        // Smarter Phone/ID detection - Handle Gluser Id
-        else if (!obj.phone && (h.includes("gluser") || h === "id" || h.includes("phone") || h.includes("mobile") || h.includes("contact") || h.includes("tel") || h === "ph" || h === "no")) {
-          // Extra check: if it's a name like "Geeta", skip it for phone
-          if (isNaN(Number(val.toString().substring(0, 1)))) return;
-          obj.phone = val;
+        // Smarter Phone/ID detection - Specifically optimized for Indian mobile numbers
+        // Also scans 'last comment' or 'remark' if the phone is hidden inside text
+        else if (h.includes("phone") || h.includes("mobile") || h.includes("contact") || h.includes("tel") || 
+                 h === "ph" || h === "no" || h.includes("gluser") || h === "id" || 
+                 h.includes("last comment") || h.includes("remark") || h.includes("previous")) {
+          
+          const rawVal = val.toString();
+          const digitMatches = rawVal.match(/\d+/g); // Extracts all sequences of digits
+          
+          if (digitMatches) {
+            // Priority 1: Check for a 10-digit Indian mobile number in this column
+            for (let segment of digitMatches) {
+              let clean = segment;
+              
+              // Remove common Indian prefixes if they make the total length 11 or 12
+              if (clean.length === 12 && clean.startsWith("91")) {
+                clean = clean.substring(2);
+              } else if (clean.length === 11 && clean.startsWith("0")) {
+                clean = clean.substring(1);
+              }
+              
+              // Only pick it if it's exactly 10 digits and starts with 6, 7, 8, or 9
+              if (clean.length === 10 && /^[6-9]/.test(clean)) {
+                obj.phone = clean;
+                return; // PERFECT MATCH FOUND - Stop searching other columns for this row
+              }
+            }
+            
+            // Priority 2: If we haven't found a 10-digit number yet, and this is a dedicated 'phone' column
+            if (!obj.phone && (h.includes("phone") || h.includes("mobile") || h.includes("contact"))) {
+              // Pick the longest digit sequence found in this specific phone column
+              const longest = digitMatches.reduce((a, b) => a.length >= b.length ? a : b);
+              if (longest.length >= 10) { 
+                obj.phone = longest;
+              }
+            }
+          }
         }
         // Capture specific columns for city/address
         else if (!obj.address && (h.includes("address") || h.includes("city") || h.includes("location"))) {

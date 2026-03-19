@@ -278,7 +278,7 @@ const FacebookDataCard = ({
                   <Edit className="h-4 w-4 text-white" />
                 </Button>
               )}
-              {userRole !== "admin" && !isDeleted && (
+              {!isDeleted && (
                 approvedForEdit ? (
                   <Button
                     variant="outline"

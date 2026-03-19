@@ -19,6 +19,11 @@ const CompanyApprovalView = () => {
   const [totalShifted, setTotalShifted] = useState(0);
   const [totalRejected, setTotalRejected] = useState(0);
 
+  const formatPhone = (phone: string) => {
+    if (!phone) return "";
+    // Clean any legacy 'p:' or 'P:' prefix from the string for display
+    return phone.toString().replace(/^[pP]:/i, "").trim();
+  };
 
   useEffect(() => {
     fetchData();
@@ -376,7 +381,7 @@ const CompanyApprovalView = () => {
           </div>
           <div>
             <p className="text-muted-foreground ">Phone</p>
-            <p className="">{company.phone}</p>
+            <p className="">{formatPhone(company.phone)}</p>
           </div>
           {company.email && (
             <div>
@@ -508,7 +513,7 @@ const CompanyApprovalView = () => {
                           </div>
                           <div>
                             <p className="text-sm font-medium text-muted-foreground mb-1 uppercase tracking-wider">Phone</p>
-                            <p className="text-lg font-bold text-foreground">p:{company.phone}</p>
+                            <p className="text-lg font-bold text-foreground">{formatPhone(company.phone)}</p>
                           </div>
                           <div>
                             <p className="text-sm font-medium text-muted-foreground mb-1 uppercase tracking-wider">Created At</p>

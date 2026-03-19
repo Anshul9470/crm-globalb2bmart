@@ -553,7 +553,7 @@ const AdminDashboard = ({ user }: AdminDashboardProps) => {
       {currentView === "login-approvals" && <LoginApprovalView />}
       {currentView === "assign" && <AdminDataAssignmentView />}
       {currentView === "facebook" && <FacebookDataView userId={user.id} userRole="admin" />}
-      {currentView === "search" && <SearchDataView />}
+      {currentView === "search" && <SearchDataView userRole="admin" />}
       {currentView === "paid-clients" && <PaidClientPoolView userRole="admin" />}
       {currentView === "employees" && <EmployeeManagementView />}
       {currentView === "team-management" && <AdminTeamManagementView />}

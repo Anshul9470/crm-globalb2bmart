@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Search, Loader2, User, Building2, Mail, Phone, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -22,12 +22,34 @@ interface SearchResult {
   employees?: EmployeeInfo[];
 }
 
-const SearchDataView = ({ userRole }: { userRole?: string }) => {
+const SearchDataView = ({ userRole: initialUserRole }: { userRole?: string }) => {
+  const [userRole, setUserRole] = useState<string | undefined>(initialUserRole);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [companiesFoundButFiltered, setCompaniesFoundButFiltered] = useState(false);
+
+  useEffect(() => {
+    const fetchUserAndRole = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setCurrentUser(user);
+      
+      if (user && !userRole) {
+        const { data: roleData } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        
+        if (roleData) {
+          setUserRole(roleData.role);
+        }
+      }
+    };
+    fetchUserAndRole();
+  }, [userRole]);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
@@ -420,8 +442,8 @@ const SearchDataView = ({ userRole }: { userRole?: string }) => {
 
       if (finalResults.length === 0) {
         // Check if we found companies/facebook data but they were filtered
-        const foundCompanies = companies && companies.length > 0;
-        const foundFacebook = facebookData && facebookData.length > 0;
+        const foundCompanies = companies && (companies as any[]).length > 0;
+        const foundFacebook = facebookData && (facebookData as any[]).length > 0;
 
         if (foundCompanies || foundFacebook) {
           toast.warning("Found data but no results to display. This might be due to access restrictions.");
@@ -429,6 +451,20 @@ const SearchDataView = ({ userRole }: { userRole?: string }) => {
           toast.info("No results found. Try a different search term.");
         }
       } else {
+        // Check if any results are restricted to show a toast
+        const isAdmin = userRole === "admin";
+        if (!isAdmin && currentUser) {
+          const restrictedResult = finalResults.find(result => {
+            const isAssignedToOthers = result.employees && result.employees.length > 0;
+            const isAssignedToMe = result.employees?.some(emp => emp.id === currentUser.id);
+            return isAssignedToOthers && !isAssignedToMe;
+          });
+
+          if (restrictedResult && restrictedResult.employees) {
+            const personName = restrictedResult.employees[0]?.name || "another person";
+            toast.info(`Some data is already assigned to ${personName}. Details are hidden.`);
+          }
+        }
         toast.success(`Found ${finalResults.length} result(s)`);
       }
     } catch (error: any) {
@@ -532,6 +568,47 @@ const SearchDataView = ({ userRole }: { userRole?: string }) => {
               </div>
               <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 {searchResults.map((result) => {
+                  const isAdmin = userRole === "admin";
+                  const isAssignedToOthers = result.employees && result.employees.length > 0;
+                  const isAssignedToMe = result.employees?.some(emp => emp.id === currentUser?.id);
+                  const isRestricted = !isAdmin && isAssignedToOthers && !isAssignedToMe;
+
+                  if (isRestricted) {
+                    const assignedPerson = result.employees?.[0]?.name || "Another Employee";
+                    return (
+                      <Card key={`${result.type}-${result.id}`} className="overflow-hidden border-amber-200 bg-amber-50/30">
+                        <CardHeader className="p-4 bg-amber-100/50">
+                          <CardTitle className="text-sm font-bold flex items-center gap-2 text-amber-900">
+                            <AlertCircle className="h-4 w-4" />
+                            Data Restricted
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-4 space-y-3">
+                          <div className="flex items-start gap-3">
+                            <div className="p-2 bg-amber-100 rounded-lg">
+                              <Building2 className="h-5 w-5 text-amber-700" />
+                            </div>
+                            <div>
+                               <h3 className="font-bold text-amber-900">
+                                 {result.data.company_name || result.data.name || "Company"}
+                               </h3>
+                               <p className="text-xs text-amber-700">Details are hidden for security</p>
+                            </div>
+                          </div>
+                          
+                          <div className="pt-2 border-t border-amber-200">
+                             <p className="text-[10px] font-bold uppercase tracking-wider text-amber-600 mb-1">
+                               Status
+                             </p>
+                             <Badge variant="outline" className="text-amber-700 border-amber-300">
+                               Assigned to {assignedPerson}
+                             </Badge>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  }
+
                   const employeeFooter = result.employees && result.employees.length > 0 ? (
                     <div className="pt-2 mt-2 border-t space-y-2">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-primary mb-1">
