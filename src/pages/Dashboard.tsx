@@ -153,44 +153,6 @@ const Dashboard = () => {
           }
         }
 
-        // IMPORTANT: Strictly enforce per-session approval
-        if (currentRole && currentRole !== "admin") {
-          // Check if this browser is already authorized
-          const isSessionApproved = localStorage.getItem("is_session_approved");
-          
-          if (!isSessionApproved) {
-            // New device/session: Check the database status
-            const { data: currentApproval } = await (supabase
-              .from("login_approvals" as any)
-              .select("status")
-              .eq("user_id", currentUser.id)
-              .maybeSingle() as any);
-
-            if (currentApproval?.status !== "approved") {
-              // Not approved in DB: Kick out to Auth page
-              console.log("No active approval found. Redirecting...");
-              localStorage.removeItem("dashboard_auth");
-              await supabase.auth.signOut();
-              navigate("/auth");
-              return;
-            }
-
-            // If approved in DB, "consume" it for this local machine
-            const { error: updateError } = await (supabase
-              .from("login_approvals" as any)
-              .update({ status: "pending", requested_at: new Date().toISOString() })
-              .eq("user_id", currentUser.id) as any);
-            
-            if (updateError) {
-              console.error("Critical: Could not consume approval in DB.", updateError);
-              localStorage.setItem("is_session_approved", "true");
-            } else {
-              // Mark this local machine as approved
-              localStorage.setItem("is_session_approved", "true");
-              console.log("Approval consumed successfully. Browser authorized.");
-            }
-          }
-        }
       } catch (err) {
         console.error("Error in post-auth initialization:", err);
       }

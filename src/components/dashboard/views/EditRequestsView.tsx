@@ -473,7 +473,7 @@ const EditRequestsView = () => {
                           new: selectedRequest.email 
                         },
                         { 
-                          label: selectedRequest.is_company ? "Products/Services" : "Products", 
+                          label: "Product", 
                           old: selectedRequest.is_company ? selectedRequest.original_data?.products_services : selectedRequest.original_data?.products,
                           new: selectedRequest.products || selectedRequest.products_services 
                         },

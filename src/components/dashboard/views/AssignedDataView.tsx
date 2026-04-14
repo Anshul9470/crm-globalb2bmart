@@ -680,7 +680,7 @@ const AssignedDataView = ({ userId, userRole }: AssignedDataViewProps) => {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="products">Products *</Label>
+              <Label htmlFor="products">Product *</Label>
               <Input
                 id="products"
                 value={editRequestFormData.products}

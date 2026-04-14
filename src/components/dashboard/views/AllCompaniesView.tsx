@@ -476,7 +476,7 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
           <div className="relative max-w-2xl mx-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
             <Input
-              placeholder="Search by company name, phone number, or ID..."
+              placeholder="Search by name, phone, product, or ID..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 h-12 bg-white/5 border-white/10 text-white placeholder:text-muted-foreground text-lg rounded-xl focus:ring-primary shadow-lg ring-1 ring-white/10"
@@ -698,7 +698,7 @@ const AllCompaniesView = ({ userRole }: AllCompaniesViewProps) => {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="products">Products / Services *</Label>
+              <Label htmlFor="products">Product *</Label>
               <Input
                 id="products"
                 value={editRequestFormData.products}

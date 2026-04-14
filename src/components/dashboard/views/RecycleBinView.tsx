@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Building2, Phone, Mail, MapPin, RotateCcw, Trash2, Search, Calendar, User, Share2, UserPlus } from "lucide-react";
+import { Building2, Phone, Mail, MapPin, RotateCcw, Trash2, Search, Calendar, User, Share2, UserPlus, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import FacebookDataCard from "./FacebookDataCard";
 
@@ -1539,6 +1539,12 @@ const RecycleBinView = ({ userRole, userId }: RecycleBinViewProps) => {
                             <div className="flex items-center gap-2 text-muted-foreground">
                               <MapPin className="h-4 w-4" />
                               {company.address}
+                            </div>
+                          )}
+                          {company.products_services && (
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <Package className="h-4 w-4" />
+                              <span className="font-medium">Product:</span> {company.products_services}
                             </div>
                           )}
                           <div className="flex items-center gap-2 text-muted-foreground">

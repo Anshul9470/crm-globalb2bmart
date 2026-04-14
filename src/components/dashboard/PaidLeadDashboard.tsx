@@ -43,16 +43,6 @@ const PaidLeadDashboard = ({ user }: PaidLeadDashboardProps) => {
   }, []);
 
   const handleLogout = async () => {
-    // Reset login approval status to pending on logout for security
-    try {
-      await (supabase
-        .from("login_approvals" as any)
-        .update({ status: "pending", requested_at: new Date().toISOString() })
-        .eq("user_id", user.id) as any);
-    } catch (e) {
-      console.error("Logout approval sync failed:", e);
-    }
-
     await supabase.auth.signOut();
     toast.success("Logged out successfully");
     navigate("/auth");

@@ -178,12 +178,11 @@ const CompanyApprovalView = () => {
         return acc;
       }, {});
 
-      // Process in batches to avoid API limits (100 items per request to avoid URL too long error)
+      // Process in batches
       let totalApproved = 0;
-      for (const [creatorKey, ids] of Object.entries(groups)) {
+      for (const [_, ids] of Object.entries(groups)) {
         const batchSize = 100;
         const companyIds = ids as string[];
-        const actualCreatorId = creatorKey === "null" ? null : creatorKey;
 
         for (let i = 0; i < companyIds.length; i += batchSize) {
           const batchIds = companyIds.slice(i, i + batchSize);
@@ -192,7 +191,7 @@ const CompanyApprovalView = () => {
             .from("companies" as any)
             .update({
               approval_status: "approved",
-              assigned_to_id: actualCreatorId,
+              assigned_to_id: null, // Keep unassigned upon approval as requested
               assigned_at: nowIso
             })
             .in("id", batchIds) as any);
@@ -271,7 +270,7 @@ const CompanyApprovalView = () => {
         .from("companies" as any)
         .update({
           approval_status: "approved",
-          assigned_to_id: company.created_by_id,
+          assigned_to_id: null, // Set to unassigned as requested
           assigned_at: nowIso
         })
         .eq("id", company.id) as any);
@@ -395,12 +394,20 @@ const CompanyApprovalView = () => {
               <p className="">{company.address}</p>
             </div>
           )}
-          {company.products_services && (
-            <div className="md:col-span-2">
-              <p className="text-muted-foreground ">Products & Services</p>
-              <p className="">{company.products_services}</p>
-            </div>
-          )}
+          {(() => {
+            const scanFields = ['products_services', 'products', 'Products', 'Product', 'product', 'services', 'Services', 'item', 'Item', 'category', 'Category', 'description', 'Description', 'desc', 'Deals In', 'deals_in', 'industry', 'Industry'];
+            const foundValue = scanFields.map(f => (company as any)[f]).find(v => v && v.toString().trim() !== "");
+            
+            if (foundValue) {
+              return (
+                <div className="md:col-span-2 bg-blue-50 p-2 rounded-md border border-blue-100">
+                  <p className="text-blue-600 font-bold text-xs uppercase tracking-wider mb-1">Products</p>
+                  <p className="text-blue-800 font-semibold">{foundValue}</p>
+                </div>
+              );
+            }
+            return null;
+          })()}
           <div>
             <p className="text-muted-foreground ">Created At</p>
             <p className="">{new Date(company.created_at).toLocaleString()}</p>
@@ -508,6 +515,10 @@ const CompanyApprovalView = () => {
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
                           <div>
+                            <p className="text-sm font-medium text-muted-foreground mb-1 uppercase tracking-wider">Company Name</p>
+                            <p className="text-lg font-bold text-foreground">{company.company_name}</p>
+                          </div>
+                          <div>
                             <p className="text-sm font-medium text-muted-foreground mb-1 uppercase tracking-wider">Owner Name</p>
                             <p className="text-lg font-bold text-foreground">{company.owner_name}</p>
                           </div>
@@ -515,13 +526,23 @@ const CompanyApprovalView = () => {
                             <p className="text-sm font-medium text-muted-foreground mb-1 uppercase tracking-wider">Phone</p>
                             <p className="text-lg font-bold text-foreground">{formatPhone(company.phone)}</p>
                           </div>
+                          {(() => {
+                            const scanFields = ['products_services', 'products', 'Products', 'Product', 'product', 'services', 'Services', 'item', 'Item', 'category', 'Category', 'description', 'Description', 'desc', 'Deals In', 'deals_in', 'industry', 'Industry'];
+                            const foundValue = scanFields.map(f => (company as any)[f]).find(v => v && v.toString().trim() !== "");
+                            
+                            if (foundValue) {
+                              return (
+                                <div className="md:col-span-2 bg-blue-50/50 p-3 rounded-lg border border-blue-200">
+                                  <p className="text-sm font-bold text-blue-700 mb-1 uppercase tracking-wider">Products</p>
+                                  <p className="text-md font-bold text-blue-900">{foundValue}</p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                           <div>
-                            <p className="text-sm font-medium text-muted-foreground mb-1 uppercase tracking-wider">Created At</p>
-                            <p className="text-sm font-medium">{new Date(company.created_at).toLocaleString()}</p>
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-muted-foreground mb-1 uppercase tracking-wider">Assigned At</p>
-                            <p className="text-sm font-medium">{company.assigned_at ? new Date(company.assigned_at).toLocaleString() : "Not assigned"}</p>
+                            <p className="text-sm font-medium text-muted-foreground mb-1 uppercase tracking-wider">Created Date & Time</p>
+                            <p className="text-sm font-medium bg-white/5 p-1 rounded inline-block">{new Date(company.created_at).toLocaleString()}</p>
                           </div>
                         </div>
                       </div>

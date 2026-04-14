@@ -9,7 +9,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Eye, EyeOff } from "lucide-react";
+import Logo from "/app_logo.png";
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -24,6 +25,8 @@ const Auth = () => {
   const [resetEmail, setResetEmail] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
 
   // Mobile detection logic
   useEffect(() => {
@@ -80,69 +83,9 @@ const Auth = () => {
         throw new Error("Authentication failed");
       }
 
-      // Check user role first - admins can bypass approval
-      const { data: roleData } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", authData.user.id)
-        .single();
-
-      if (roleData?.role === "admin") {
-        toast.success("Login successful!");
-        navigate("/dashboard");
-        return;
-      }
-
-      // For non-admins, enforce login approval
-      const { data: approval, error: approvalError } = await (supabase
-        .from("login_approvals" as any)
-        .select("*")
-        .eq("user_id", authData.user.id)
-        .order("requested_at", { ascending: false })
-        .limit(1)
-        .maybeSingle() as any);
-
-      if (approvalError) {
-        console.error("Error fetching approval status:", approvalError);
-      }
-
-      // If no approval record exists, create one and send notification
-      if (!approval) {
-        const userName = authData.user.user_metadata?.display_name || authData.user.email?.split("@")[0] || "User";
-        
-        await (supabase
-          .from("login_approvals" as any)
-          .insert({
-            user_id: authData.user.id,
-            user_email: authData.user.email || loginEmail,
-            user_name: userName,
-            status: "pending",
-          }) as any);
-
-        await sendLoginApprovalEmail(authData.user.email || loginEmail, userName);
-        await supabase.auth.signOut();
-        toast.info("Your login request has been sent for approval. You will receive an email once approved.");
-        return;
-      }
-
-      // Check approval status
-      if (approval.status === "pending") {
-        await supabase.auth.signOut();
-        toast.info("Your login request is pending approval. Please wait for admin approval.");
-        return;
-      }
-
-      if (approval.status === "rejected") {
-        await supabase.auth.signOut();
-        toast.error("Your login request has been rejected. Please contact admin.");
-        return;
-      }
-
-      // If approved, allow login. Dashboard will "consume" this approval once it loads.
-      if (approval.status === "approved") {
-        toast.success("Login successful!");
-        navigate("/dashboard");
-      }
+      // Login successful
+      toast.success("Login successful!");
+      navigate("/dashboard");
     } catch (error: any) {
       if (error.message?.includes("email_not_confirmed")) {
         toast.error("Please check your email and click the confirmation link before logging in.");
@@ -223,10 +166,19 @@ const Auth = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md bg-card/50 backdrop-blur-sm border-white/10">
         <CardHeader className="text-center">
-          <CardTitle className="text-3xl font-bold text-primary">CRM System</CardTitle>
-          <CardDescription>Manage your customer relationships efficiently</CardDescription>
+          <div className="flex flex-col items-center gap-2 mb-4">
+            <img 
+              src={Logo} 
+              alt="Logo" 
+              className="h-16 w-16 object-contain" 
+              style={{ maxWidth: '80px' }}
+            />
+            <p className="text-xs text-white/60">WebWave Business Pvt. Ltd</p>
+          </div>
+          <CardTitle className="text-3xl font-bold text-primary">Core Connect</CardTitle>
+          <CardDescription className="text-white/60">Manage your customer relationships efficiently</CardDescription>
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="login" className="w-full ">
@@ -260,15 +212,25 @@ const Auth = () => {
                       Forgot Password?
                     </button>
                   </div>
-                  <Input
-                    id="login-password"
-                    type="password"
-                    placeholder="Enter your password"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    className="border-white/20 placeholder:text-white/60"
-                    required
-                  />
+                  <div className="relative">
+                    <Input
+                      id="login-password"
+                      type={showLoginPassword ? "text" : "password"}
+                      placeholder="Enter your password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      className="border-white/20 placeholder:text-white/60 pr-10"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword(!showLoginPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      tabIndex={-1}
+                    >
+                      {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
                 <Button type="submit" className="w-full" disabled={loading}>
                   {loading ? (
@@ -311,16 +273,26 @@ const Auth = () => {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="signup-password">Password</Label>
-                  <Input
-                    id="signup-password"
-                    type="password"
-                    placeholder="Create a password (min 6 characters)"
-                    value={signupPassword}
-                    onChange={(e) => setSignupPassword(e.target.value)}
-                    className="border-white/20 placeholder:text-white/60"
-                    required
-                    minLength={6}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="signup-password"
+                      type={showSignupPassword ? "text" : "password"}
+                      placeholder="Create a password (min 6 characters)"
+                      value={signupPassword}
+                      onChange={(e) => setSignupPassword(e.target.value)}
+                      className="border-white/20 placeholder:text-white/60 pr-10"
+                      required
+                      minLength={6}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSignupPassword(!showSignupPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      tabIndex={-1}
+                    >
+                      {showSignupPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
                 <div className="space-y-2 text-white/90">
                   <Label className="text-black/80" htmlFor="signup-role">Select Your Role</Label>

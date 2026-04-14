@@ -130,7 +130,7 @@ const HotDataView = ({ userId, userRole }: HotDataViewProps) => {
       owner_name: data.owner_name || "",
       phone: data.phone || "",
       email: data.email || "",
-      products: data.products || "",
+      products: data.products || data.products_services || "",
       services: data.services || ""
     });
     setEditRequestDialogOpen(true);

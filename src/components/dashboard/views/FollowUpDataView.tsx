@@ -130,7 +130,7 @@ const FollowUpDataView = ({ userId, userRole }: FollowUpDataViewProps) => {
       owner_name: data.owner_name || "",
       phone: data.phone || "",
       email: data.email || "",
-      products: data.products || "",
+      products: data.products || data.products_services || "",
       services: data.services || ""
     });
     setEditRequestDialogOpen(true);
@@ -494,7 +494,7 @@ const FollowUpDataView = ({ userId, userRole }: FollowUpDataViewProps) => {
           <DialogHeader>
             <DialogTitle className="text-white">Submit Facebook Data</DialogTitle>
             <DialogDescription className="text-white/80">
-              Please fill in all required fields. Services is optional.
+              Please fill in all required fields.
             </DialogDescription>
           </DialogHeader>
           {requestingEditData && (
@@ -555,7 +555,7 @@ const FollowUpDataView = ({ userId, userRole }: FollowUpDataViewProps) => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-request-products" className="text-white">
-                  Products <span className="text-destructive">*</span>
+                  Product <span className="text-destructive">*</span>
                 </Label>
                 <Textarea
                   id="edit-request-products"

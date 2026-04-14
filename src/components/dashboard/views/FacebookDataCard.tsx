@@ -9,7 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { User, Mail, Calendar, MessageSquare, Clock, Loader2, Edit, Pencil, Trash2, Phone, Share2, CheckCircle2, MapPin } from "lucide-react";
+import { User, Mail, Calendar, MessageSquare, Clock, Loader2, Edit, Pencil, Trash2, Phone, Share2, CheckCircle2, MapPin, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface FacebookDataCardProps {
@@ -309,6 +309,15 @@ const FacebookDataCard = ({
             {userRole !== "admin" && data.owner_name && (
               <p className="text-sm text-muted-foreground truncate mt-1">{data.owner_name}</p>
             )}
+            {/* Products Info - Prominent */}
+            {(data.products || data.services || (data as any).item || (data as any).category || (data as any).business_description) && (
+              <div className="flex items-center gap-1.5 mt-1.5 bg-primary/10 px-2 py-0.5 rounded-md w-fit border border-primary/20">
+                <Package className="h-3.5 w-3.5 text-primary" />
+                <span className="text-[11px] font-bold text-primary truncate max-w-[180px]">
+                  {[data.products, data.services, (data as any).item, (data as any).category, (data as any).business_description].filter(Boolean).join(", ")}
+                </span>
+              </div>
+            )}
             {userRole === "admin" && (
               <Badge variant="outline" className="text-xs mt-1">
                 ID: {data.id}
@@ -343,23 +352,19 @@ const FacebookDataCard = ({
               <span className="flex-1 truncate min-w-0">{data.owner_name}</span>
             </div>
           )}
-          {userRole === "admin" && data.products && (
+          {userRole === "admin" && (data.products || data.services || (data as any).item || (data as any).category || (data as any).business_description) && (
             <div className="text-sm text-foreground min-h-[20px] flex items-center gap-2">
               <span className="font-semibold min-w-[70px] flex-shrink-0">Products:</span>
-              <span className="flex-1 truncate min-w-0">{data.products}</span>
-            </div>
-          )}
-          {userRole === "admin" && data.services && (
-            <div className="text-sm text-foreground min-h-[20px] flex items-center gap-2">
-              <span className="font-semibold min-w-[70px] flex-shrink-0">Services:</span>
-              <span className="flex-1 truncate min-w-0">{data.services}</span>
-            </div>
-          )}
-          {userRole !== "admin" && (data.products || data.services) && (
-            <div className="text-sm text-foreground min-h-[20px] flex items-center gap-2 pt-1 border-t">
-              <span className="font-semibold min-w-[140px] flex-shrink-0">Products & Services:</span>
               <span className="flex-1 truncate min-w-0">
-                {[data.products, data.services].filter(Boolean).join(", ")}
+                {[data.products, data.services, (data as any).item, (data as any).category, (data as any).business_description].filter(Boolean).join(", ")}
+              </span>
+            </div>
+          )}
+          {userRole !== "admin" && (data.products || data.services || (data as any).item || (data as any).category || (data as any).business_description) && (
+            <div className="text-sm text-foreground min-h-[20px] flex items-center gap-2 pt-1 border-t">
+              <span className="font-semibold min-w-[100px] flex-shrink-0">Products:</span>
+              <span className="flex-1 truncate min-w-0">
+                {[data.products, data.services, (data as any).item, (data as any).category, (data as any).business_description].filter(Boolean).join(", ")}
               </span>
             </div>
           )}
@@ -525,7 +530,7 @@ const FacebookDataCard = ({
                             )}
                             {(data.products || data.services) && (
                               <div className="flex items-start gap-2">
-                                <span className="font-semibold text-white/80 min-w-[120px] flex-shrink-0">Products & Services:</span>
+                                <span className="font-semibold text-white/80 min-w-[120px] flex-shrink-0">Product:</span>
                                 <span className="text-white flex-1">
                                   {[data.products, data.services].filter(Boolean).join(", ")}
                                 </span>

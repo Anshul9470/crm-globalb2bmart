@@ -40,16 +40,6 @@ const EmployeeDashboard = ({ user }: EmployeeDashboardProps) => {
   const [userName, setUserName] = useState<string>("");
 
   const handleLogout = async () => {
-    // Reset login approval status to pending on logout for security
-    try {
-      await (supabase
-        .from("login_approvals" as any)
-        .update({ status: "pending", requested_at: new Date().toISOString() })
-        .eq("user_id", user.id) as any);
-    } catch (e) {
-      console.error("Logout approval sync failed:", e);
-    }
-
     await supabase.auth.signOut();
     toast.success("Logged out successfully");
     navigate("/auth");
@@ -225,96 +215,64 @@ const EmployeeDashboard = ({ user }: EmployeeDashboardProps) => {
         total: counts.assigned
       });
 
-      // Fetch today data count (companies/facebook data with comments from today)
-      // Exclude inactive data (deletion_state='inactive' or latest comment is 'block')
-      const today = new Date().toISOString().split('T')[0];
+      // Fetch today data count using robust two-step method
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-      const { data: todayCompanies } = await supabase
-        .from("companies")
-        .select(`
-          id,
-          deletion_state,
-          comments (id, category, created_at)
-        `)
-        .eq("assigned_to_id", user.id)
-        .is("deleted_at", null);
-
+      // 1. Company IDs
+      const { data: todayCompanyComments } = await supabase
+        .from("comments")
+        .select("company_id")
+        .eq("comment_date", today)
+        .eq("user_id", user.id);
+      
+      const todayCompanyIds = [...new Set((todayCompanyComments || []).map(c => c.company_id))];
       let todayCount = 0;
-      if (todayCompanies) {
-        const todayCompaniesCount = todayCompanies.filter((company: any) => {
-          // Exclude companies with deletion_state set (inactive or recycle bins)
-          if (company.deletion_state) return false;
 
-          if (!company.comments || company.comments.length === 0) return false;
+      if (todayCompanyIds.length > 0) {
+        const { data: todayCompanies } = await supabase
+          .from("companies")
+          .select("id, deletion_state, comments(category, created_at)")
+          .in("id", todayCompanyIds)
+          .is("deleted_at", null);
 
-          // Exclude companies where latest comment is 'block' category (moved to inactive)
-          const sortedComments = [...company.comments].sort((a: any, b: any) =>
-            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          );
-          const latestComment = sortedComments[0];
-          if (latestComment && latestComment.category === 'block') {
-            return false; // Exclude - it's in inactive section
-          }
-
-          return company.comments.some((comment: any) =>
-            comment.created_at.startsWith(today)
-          );
-        }).length;
-        todayCount += todayCompaniesCount;
-      }
-
-      if (shares && shares.length > 0) {
-        const fbIds = shares.map((s: any) => s.facebook_data_id);
-
-        // Fetch Facebook data with deletion_state
-        const { data: fbData } = await (supabase
-          .from("facebook_data" as any)
-          .select("id, deletion_state")
-          .in("id", fbIds) as any);
-
-        // Fetch all comments for these Facebook data items
-        const { data: allFbComments } = await (supabase
-          .from("facebook_data_comments" as any)
-          .select("facebook_data_id, category, created_at, user_id")
-          .in("facebook_data_id", fbIds) as any);
-
-        if (fbData && allFbComments) {
-          // Group comments by facebook_data_id and get latest comment for each
-          const fbLatestComments: Record<number, any> = {};
-          allFbComments.forEach((comment: any) => {
-            const fbId = comment.facebook_data_id;
-            if (!fbLatestComments[fbId] ||
-              new Date(comment.created_at) > new Date(fbLatestComments[fbId].created_at)) {
-              fbLatestComments[fbId] = comment;
-            }
-          });
-
-          // Filter Facebook data: exclude inactive and count only those with today's comments
-          const activeFbIds = fbData
-            .filter((fb: any) => {
-              // Exclude items with deletion_state set (inactive or recycle bins)
-              if (fb.deletion_state) return false;
-
-              // Exclude items where latest comment is 'block' category (moved to inactive)
-              const latestComment = fbLatestComments[fb.id];
-              if (latestComment && latestComment.category === 'block') {
-                return false; // Exclude - it's in inactive section
-              }
-
-              return true;
-            })
-            .map((fb: any) => fb.id);
-
-          // Count only active Facebook data with comments from today
-          const todayFbComments = allFbComments.filter((comment: any) =>
-            activeFbIds.includes(comment.facebook_data_id) &&
-            comment.created_at.startsWith(today)
-          );
-
-          const uniqueFbIds = new Set(todayFbComments.map((c: any) => c.facebook_data_id));
-          todayCount += uniqueFbIds.size;
+        if (todayCompanies) {
+          todayCount += todayCompanies.filter((company: any) => {
+            if (company.deletion_state) return false;
+            const sortedComments = [...(company.comments || [])].sort((a: any, b: any) =>
+              new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+            );
+            return !(sortedComments[0] && sortedComments[0].category === "block");
+          }).length;
         }
       }
+
+      // 2. FB IDs
+      const { data: todayFbCommentsData } = await (supabase
+        .from("facebook_data_comments" as any)
+        .select("facebook_data_id")
+        .eq("comment_date", today)
+        .eq("user_id", user.id) as any);
+      
+      const todayFbIds = [...new Set((todayFbCommentsData || []).map((c: any) => c.facebook_data_id))];
+      
+      if (todayFbIds.length > 0) {
+        const { data: todayFbData } = await (supabase
+          .from("facebook_data" as any)
+          .select("id, deletion_state, comments:facebook_data_comments(category, created_at)")
+          .in("id", todayFbIds) as any);
+
+        if (todayFbData) {
+          todayCount += todayFbData.filter((fb: any) => {
+            if (fb.deletion_state) return false;
+            const sortedComments = [...(fb.comments || [])].sort((a: any, b: any) =>
+              new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+            );
+            return !(sortedComments[0] && sortedComments[0].category === "block");
+          }).length;
+        }
+      }
+
       counts.today = todayCount;
 
       // Fetch category counts (companies + facebook data with latest comment in each category)

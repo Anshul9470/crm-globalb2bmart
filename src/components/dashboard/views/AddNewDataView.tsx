@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Loader2, Upload, ClipboardPaste, ListPlus, Plus } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import * as XLSX from "xlsx";
+import UpdateProductsView from "./UpdateProductsView";
 
 interface AddNewDataViewProps {
   userId: string;
@@ -198,75 +199,85 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
     const headers = rows[0].map(h => h.toLowerCase());
 
     const data = rows.slice(1).map((row, rowIndex) => {
-      const obj: any = {};
+      const obj: any = { 
+        products_services: "", 
+        company_name: "", 
+        owner_name: "", 
+        phone: "", 
+        address: "", 
+        email: "" 
+      };
+      
       headers.forEach((header: string, index: number) => {
-        const val = row[index];
-        if (val === undefined || val === null || val === "") return;
+        const val = (row[index] || "").toString().trim();
+        if (!val) return;
 
         const h = header.trim().toLowerCase();
         
-        // Smarter Company Name detection (handles 'company', 'company_name', 'business', 'organization', 'name')
-        if (!obj.company_name && (h.includes("company") || h.includes("business") || h.includes("organization") || h === "name")) {
+        // Company Name detection
+        if (!obj.company_name && (h === "company_name" || h === "company" || h === "business name" || h.includes("business") || h.includes("organization") || (h.includes("company") && !h.includes("last")) || h === "name")) {
           obj.company_name = val;
-        } 
-        // Smarter Owner Name detection - Ignore obvious employee names or empty staff cols
+        }
+        // Owner Name detection
         else if (!obj.owner_name && (h.includes("owner") || (h.includes("person") && !h.includes("contact")))) {
           obj.owner_name = val;
         }
-        // Smarter Phone/ID detection - Specifically optimized for Indian mobile numbers
-        // Also scans 'last comment' or 'remark' if the phone is hidden inside text
-        else if (h.includes("phone") || h.includes("mobile") || h.includes("contact") || h.includes("tel") || 
-                 h === "ph" || h === "no" || h.includes("gluser") || h === "id" || 
-                 h.includes("last comment") || h.includes("remark") || h.includes("previous")) {
-          
-          const rawVal = val.toString();
-          const digitMatches = rawVal.match(/\d+/g); // Extracts all sequences of digits
-          
-          if (digitMatches) {
-            // Priority 1: Check for a 10-digit Indian mobile number in this column
+        // Address
+        else if (!obj.address && (h.includes("address") || h.includes("location") || h.includes("city"))) {
+          obj.address = val;
+        }
+        // Email
+        else if (!obj.email && h.includes("email")) {
+          obj.email = val;
+        }
+        // Products detection
+        else if (h.includes("product") || h.includes("service") || h === "products_services" || h.includes("item") || h.includes("category") || h.includes("deal") || h.includes("goods")) {
+          if (obj.products_services) obj.products_services += ", " + val;
+          else obj.products_services = val;
+          obj.products = val;
+        }
+        // Last Comment / Remark
+        else if (h.includes("last comment") || h.includes("remark") || h.includes("previous")) {
+          obj._last_comment = val;
+          // Also try to extract embedded phone from comment field
+          const digitMatches = val.match(/\d+/g);
+          if (digitMatches && !obj.phone) {
             for (let segment of digitMatches) {
               let clean = segment;
-              
-              // Remove common Indian prefixes if they make the total length 11 or 12
-              if (clean.length === 12 && clean.startsWith("91")) {
-                clean = clean.substring(2);
-              } else if (clean.length === 11 && clean.startsWith("0")) {
-                clean = clean.substring(1);
-              }
-              
-              // Only pick it if it's exactly 10 digits and starts with 6, 7, 8, or 9
+              if (clean.length === 12 && clean.startsWith("91")) clean = clean.substring(2);
+              else if (clean.length === 11 && clean.startsWith("0")) clean = clean.substring(1);
               if (clean.length === 10 && /^[6-9]/.test(clean)) {
                 obj.phone = clean;
-                return; // PERFECT MATCH FOUND - Stop searching other columns for this row
-              }
-            }
-            
-            // Priority 2: If we haven't found a 10-digit number yet, and this is a dedicated 'phone' column
-            if (!obj.phone && (h.includes("phone") || h.includes("mobile") || h.includes("contact"))) {
-              // Pick the longest digit sequence found in this specific phone column
-              const longest = digitMatches.reduce((a, b) => a.length >= b.length ? a : b);
-              if (longest.length >= 10) { 
-                obj.phone = longest;
+                break;
               }
             }
           }
         }
-        // Capture specific columns for city/address
-        else if (!obj.address && (h.includes("address") || h.includes("city") || h.includes("location"))) {
-          obj.address = val;
-        }
-        else if (!obj.email && h.includes("email")) {
-          obj.email = val;
-        }
-        // Capture comments and status separately to create real comments later
-        else if (h.includes("last comment") || h.includes("remark") || h.includes("previous")) {
-          obj._last_comment = val;
-        }
-        else if (h.includes("status") || (index === row.length - 1 && !obj._status)) {
+        // Status
+        else if (h.includes("status")) {
           obj._status = val;
         }
-        else if (!obj.products_services && (h.includes("product") || h.includes("service"))) {
-          obj.products_services = val;
+        // Phone/Mobile/Contact/Gluser Id/Id — ALWAYS try to extract phone from these
+        else if (h.includes("phone") || h.includes("mobile") || h.includes("contact") || h.includes("tel") ||
+                 h === "ph" || h === "no" || h.includes("gluser") || h === "id" || h.includes("gl id")) {
+          const rawVal = val.toString();
+          const digitMatches = rawVal.match(/\d+/g);
+          if (digitMatches) {
+            for (let segment of digitMatches) {
+              let clean = segment;
+              if (clean.length === 12 && clean.startsWith("91")) clean = clean.substring(2);
+              else if (clean.length === 11 && clean.startsWith("0")) clean = clean.substring(1);
+              if (clean.length === 10 && /^[6-9]/.test(clean)) {
+                obj.phone = clean;
+                return;
+              }
+            }
+            // If no 10-digit found, pick the longest
+            if (!obj.phone && (h.includes("phone") || h.includes("mobile") || h.includes("contact"))) {
+              const longest = digitMatches.reduce((a, b) => a.length >= b.length ? a : b);
+              if (longest.length >= 10) obj.phone = longest;
+            }
+          }
         }
       });
       return obj;
@@ -580,7 +591,7 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
                     />
                   </div>
                   <div className="md:col-span-2 space-y-2">
-                    <Label htmlFor="products_services" className="text-white">Products & Services</Label>
+                    <Label htmlFor="products_services" className="text-white">Product</Label>
                     <Textarea
                       id="products_services"
                       value={formData.products_services}
@@ -730,7 +741,7 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
                 />
               </div>
               <div className="md:col-span-2 space-y-2">
-                <Label htmlFor="products_services" className="text-white">Products & Services</Label>
+                <Label htmlFor="products_services" className="text-white">Product</Label>
                 <Textarea
                   id="products_services"
                   value={formData.products_services}
@@ -748,6 +759,9 @@ const AddNewDataView = ({ userId, userRole }: AddNewDataViewProps) => {
             </form>
           </CardContent>
         </Card>
+      )}
+      {userRole === "admin" && (
+        <UpdateProductsView />
       )}
     </div>
   );

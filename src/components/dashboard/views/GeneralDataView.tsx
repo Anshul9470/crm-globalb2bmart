@@ -650,11 +650,11 @@ const GeneralDataView = ({ userId, userRole }: GeneralDataViewProps) => {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-request-products" className="text-white">
-                  Products <span className="text-destructive">*</span>
+                  Product <span className="text-destructive">*</span>
                 </Label>
                 <Textarea
                   id="edit-request-products"
-                  placeholder="Enter products"
+                  placeholder="Enter product details"
                   value={editRequestFormData.products}
                   onChange={(e) => setEditRequestFormData({ ...editRequestFormData, products: e.target.value })}
                   rows={3}

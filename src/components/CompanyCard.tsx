@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
-import { Building2, Phone, Mail, MapPin, MessageSquare, Trash2, Clock, Loader2, Calendar, User, Pencil, Edit, CheckCircle2 } from "lucide-react";
+import { Building2, Phone, Mail, MapPin, MessageSquare, Trash2, Clock, Loader2, Calendar, User, Pencil, Edit, CheckCircle2, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CompanyCardProps {
@@ -438,7 +438,7 @@ const CompanyCard = ({
               user_id: userData.user.id,
               comment_text: "Moved to Inactive by team lead",
               category: commentCategory,
-              comment_date: new Date().toISOString().slice(0, 10),
+              comment_date: new Date().toLocaleDateString('en-CA'),
             },
           ]);
 
@@ -491,7 +491,7 @@ const CompanyCard = ({
               user_id: userData.user.id,
               comment_text: "Moved to Inactive by employee",
               category: commentCategory,
-              comment_date: new Date().toISOString().slice(0, 10),
+              comment_date: new Date().toLocaleDateString('en-CA'),
             },
           ]);
 
@@ -586,18 +586,36 @@ const CompanyCard = ({
   };
 
   return (
-    <Card className="group hover:shadow-lg transition-all duration-300 hover:border-primary/20 border-2 flex flex-col h-full">
-      <CardHeader className="pb-4 flex-shrink-0">
+    <Card className="group glass-card hover:shadow-2xl transition-all duration-500 hover:border-primary/40 border-[1px] flex flex-col h-full overflow-hidden hover:-translate-y-1">
+      <CardHeader className="pb-4 flex-shrink-0 bg-white/5">
+
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
             <CardTitle className="flex items-center gap-2 text-lg font-semibold mb-2">
               <Building2 className="h-5 w-5 text-primary flex-shrink-0" />
               <span className="truncate">{company.company_name}</span>
             </CardTitle>
-            {company.owner_name && (
-              <p className="text-sm text-muted-foreground font-medium truncate">{company.owner_name}</p>
-            )}
-          </div>
+              {company.owner_name && (
+                <p className="text-sm text-muted-foreground font-medium truncate">{company.owner_name}</p>
+              )}
+              {/* Products Info - High Visibility Bulletproof Scanner */}
+              {(() => {
+                const scanFields = ['products_services', 'products', 'Products', 'Product', 'product', 'services', 'Services', 'item', 'Item', 'category', 'Category', 'description', 'Description', 'desc', 'Deals In', 'deals_in', 'industry', 'Industry'];
+                const foundValue = scanFields.map(f => (company as any)[f]).find(v => v && v.toString().trim() !== "");
+                
+                if (foundValue) {
+                  return (
+                    <div className="flex items-center gap-1.5 mt-2 bg-blue-600/15 px-2.5 py-1 rounded-md w-fit border border-blue-600/30 shadow-sm animate-pulse-subtle">
+                      <Package className="h-4 w-4 text-blue-600" />
+                      <span className="text-[12px] font-bold text-blue-600 truncate max-w-[200px]">
+                        {foundValue}
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+            </div>
           <div className="flex items-center gap-2">
             {userRole === "admin" && onEdit && (
               <Button
@@ -649,10 +667,38 @@ const CompanyCard = ({
               <span className="text-sm truncate">{company.address}</span>
             </div>
           )}
-          {company.products_services && (
-            <div className="text-muted-foreground pt-1 border-t min-h-[20px] flex items-center gap-2">
-              <span className="font-semibold text-foreground min-w-[140px] flex-shrink-0">Products & Services:</span>
-              <span className="text-sm flex-1 truncate min-w-0">{company.products_services}</span>
+          {(() => {
+            const scanFields = ['products_services', 'products', 'Products', 'Product', 'product', 'services', 'Services', 'item', 'Item', 'category', 'Category', 'description', 'Description', 'desc', 'Deals In', 'deals_in', 'industry', 'Industry'];
+            const foundValue = scanFields.map(f => (company as any)[f]).find(v => v && v.toString().trim() !== "");
+            
+            if (foundValue) {
+              return (
+                <div className="flex items-center gap-2.5 text-muted-foreground pt-1.5 border-t min-h-[24px]">
+                  <Package className="h-4.5 w-4.5 flex-shrink-0 text-blue-600/80" />
+                  <div className="text-sm font-bold text-foreground truncate flex items-center gap-1.5">
+                    <span className="text-blue-600 font-semibold">Products:</span>
+                    <span className="truncate bg-blue-50 px-1.5 py-0.5 rounded text-blue-700">
+                      {foundValue}
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          })()}
+          {company.created_at && (
+            <div className={`flex items-center gap-2.5 text-muted-foreground pt-1 border-t min-h-[20px] ${userRole === "admin" ? "bg-primary/5 p-1 rounded" : ""}`}>
+              <Calendar className="h-4 w-4 flex-shrink-0 text-primary/70" />
+              <span className="text-sm text-foreground">
+                <span className="font-semibold">Created At:</span>{" "}
+                {new Date(company.created_at).toLocaleDateString('en-US', {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </span>
             </div>
           )}
           {showAssignedTo && (
@@ -836,10 +882,13 @@ const CompanyCard = ({
                         <span className="text-white flex-1">{company.address}</span>
                       </div>
                     )}
-                    {company.products_services && (
+                    {(company.products_services || (company as any).products || (company as any).Products || (company as any).services || (company as any).item || (company as any).category || (company as any).description) && (
                       <div className="flex items-start gap-2">
-                        <span className="font-semibold text-white/80 min-w-[120px] flex-shrink-0">Products & Services:</span>
-                        <span className="text-white flex-1">{company.products_services}</span>
+                        <Package className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+                        <span className="font-semibold text-white/80 min-w-[120px] flex-shrink-0">Products:</span>
+                        <span className="text-white flex-1">
+                          {company.products_services || (company as any).products || (company as any).Products || (company as any).services || (company as any).item || (company as any).category || (company as any).description}
+                        </span>
                       </div>
                     )}
                   </div>

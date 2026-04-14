@@ -414,10 +414,10 @@ const EmployeeDataOverviewView = ({ userId }: EmployeeDataOverviewViewProps) => 
           )}
         </div>
 
-        {(isFacebookData ? data.business_description : data.products_services) && (
+        {(isFacebookData ? (data.products || data.services || data.business_description) : (data.products_services || data.products)) && (
           <div className="mt-2">
             <p className="text-xs text-muted-foreground">
-              <strong>{isFacebookData ? 'Description:' : 'Services:'}</strong> {isFacebookData ? data.business_description : data.products_services}
+              <strong>Product:</strong> {isFacebookData ? (data.products || data.services || data.business_description) : (data.products_services || data.products)}
             </p>
           </div>
         )}

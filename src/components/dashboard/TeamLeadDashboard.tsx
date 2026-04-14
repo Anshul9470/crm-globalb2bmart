@@ -79,27 +79,35 @@ const TeamLeadDashboard = ({ user }: TeamLeadDashboardProps) => {
         counts.assigned = assignedCount;
       }
 
-      // Fetch today data count (companies with comments from today)
-      const today = new Date().toISOString().split("T")[0];
+      // Fetch today data count using robust two-step method
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-      const { data: todayCompanies } = await supabase
-        .from("companies")
-        .select(`
-          id,
-          comments (id, created_at)
-        `)
-        .eq("assigned_to_id", user.id)
-        .is("deleted_at", null);
-
+      const { data: todayCompanyComments } = await supabase
+        .from("comments")
+        .select("company_id")
+        .eq("comment_date", today);
+      
+      const todayCompanyIds = [...new Set((todayCompanyComments || []).map(c => c.company_id))];
       let todayCount = 0;
-      if (todayCompanies) {
-        const todayCompaniesCount = todayCompanies.filter((company: any) => {
-          if (!company.comments || company.comments.length === 0) return false;
-          return company.comments.some((comment: any) =>
-            comment.created_at.startsWith(today)
-          );
-        }).length;
-        todayCount += todayCompaniesCount;
+
+      if (todayCompanyIds.length > 0) {
+        const { data: todayCompanies } = await supabase
+          .from("companies")
+          .select("id, deletion_state, comments(category, created_at)")
+          .in("id", todayCompanyIds)
+          .eq("assigned_to_id", user.id)
+          .is("deleted_at", null);
+
+        if (todayCompanies) {
+          todayCount += todayCompanies.filter((company: any) => {
+            if (company.deletion_state) return false;
+            const sortedComments = [...(company.comments || [])].sort((a: any, b: any) =>
+              new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+            );
+            return !(sortedComments[0] && sortedComments[0].category === "block");
+          }).length;
+        }
       }
       counts.today = todayCount;
 
@@ -307,16 +315,6 @@ const TeamLeadDashboard = ({ user }: TeamLeadDashboardProps) => {
   }, [user.id, user.email]);
 
   const handleLogout = async () => {
-    // Reset login approval status to pending on logout for security
-    try {
-      await (supabase
-        .from("login_approvals" as any)
-        .update({ status: "pending", requested_at: new Date().toISOString() })
-        .eq("user_id", user.id) as any);
-    } catch (e) {
-      console.error("Logout approval sync failed:", e);
-    }
-
     await supabase.auth.signOut();
     toast.success("Logged out successfully");
     navigate("/auth");
