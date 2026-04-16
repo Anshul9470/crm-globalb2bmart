@@ -5,7 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { LogOut, Menu, RefreshCw, User as UserIcon } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import Logo from "/app_logo.png";
+import Logo from "@/assets/app_logo.png";
 
 
 interface MenuItem {

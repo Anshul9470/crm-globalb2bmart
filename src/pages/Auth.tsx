@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Loader2, Eye, EyeOff } from "lucide-react";
-import Logo from "/app_logo.png";
+import Logo from "@/assets/app_logo.png";
 
 const Auth = () => {
   const navigate = useNavigate();
