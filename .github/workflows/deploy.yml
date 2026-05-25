@@ -1,0 +1,35 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }} # Or password: ${{ secrets.SSH_PASSWORD }}
+          port: 22
+          script: |
+            # Navigate to the project directory - YOU MUST CHANGE THIS TO YOUR ACTUAL PATH
+            cd /root/Sales-CMS-main || cd /var/www/html/Sales-CMS-main || exit 1
+            
+            echo "Pulling latest changes from GitHub..."
+            git pull origin main
+            
+            echo "Installing dependencies..."
+            npm install --include=dev
+            
+            echo "Building the project..."
+            npm run build
+            
+            echo "Deployment finished successfully!"
